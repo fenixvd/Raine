@@ -614,7 +614,7 @@ Use absolute time in your queries.
             }
         }
 
-        AFuture<AString> describePhoto(AStringView pathToImage) {
+        AFuture<AString> describePhoto(AStringView pathToImage, AStringView xmlTag = "photo") {
             try
             {
                 if (const auto i = mImages.contains(pathToImage)) {
@@ -642,7 +642,7 @@ Use absolute time in your queries.
                 context += "\n\nDescribe the last photo.";
 
                 auto response = co_await chat.chat(std::move(context));
-                co_return mImages[pathToImage] = "<photo description>\n{}\n</photo>"_format(response.choices.at(0).message.content);
+                co_return mImages[pathToImage] = "<{} description>\n{}\n</{}>"_format(xmlTag, response.choices.at(0).message.content, xmlTag);
             } catch (const AException& e)
             {
                 ALogger::err(LOG_TAG) << "Can't describe photo"  << e;
@@ -743,10 +743,6 @@ Use absolute time in your queries.
                   },
                   [&](td::td_api::messageSticker& st) {
                       out += "[sticker]";
-                      if (!st.sticker_->emoji_.empty()) {
-                          checkForMaliciousPayloads(st.sticker_->emoji_);
-                          out += " " + st.sticker_->emoji_;
-                      }
                   },
                   [&](td::td_api::messageLocation& loc) {
                       out +=
@@ -921,15 +917,20 @@ Use absolute time in your queries.
 
                 if (msg.content_->get_id() == td::td_api::messageSticker::ID) {
                     auto& sticker = static_cast<td::td_api::messageSticker&>(*msg.content_);
+                    AString xmlTag = "sticker";
+                    if (!sticker.sticker_->emoji_.empty()) {
+                        checkForMaliciousPayloads(sticker.sticker_->emoji_);
+                        xmlTag += " " + sticker.sticker_->emoji_;
+                    }
                     if (sticker.sticker_->sticker_) {
-                        result += co_await describePhoto(co_await fetchMedia(sticker.sticker_->sticker_));
+                        result += co_await describePhoto(co_await fetchMedia(sticker.sticker_->sticker_), "sticker");
                     }
                 }
 
                 if (msg.content_->get_id() == td::td_api::messageAnimation::ID) {
                     auto& animation = static_cast<td::td_api::messageAnimation&>(*msg.content_);
                     if (animation.animation_->thumbnail_) {
-                        result += co_await describePhoto(co_await fetchMedia(animation.animation_->thumbnail_->file_));
+                        result += co_await describePhoto(co_await fetchMedia(animation.animation_->thumbnail_->file_), "animation");
                     }
                 }
 
