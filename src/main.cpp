@@ -241,7 +241,9 @@ Use absolute time in your queries.
 )"_format(result, util::formatPastHours())) + result;
                     }
                     result += "<instructions>\n"
-                    "Chat list view is limited. Use #search_chats to search for a specific chat.\n"
+                    "Chat list view is limited. Use #search_chats to search for a specific chat.\n\n"
+                    "You should not use #get_telegram_chats just to check if someone texted you. You'll receive "
+                    "notification if something happened. Use #wait instead.\n"
                     "</instructions>";
                     co_return result;
                 },
