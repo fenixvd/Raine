@@ -1,7 +1,27 @@
 cmake_minimum_required(VERSION 3.18)
+
 project(kuni
         VERSION 0.0.2 # CI_PROJECT_VERSION
     )
+
+# Compiler version check (see README for requirements)
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS 15)
+        message(FATAL_ERROR "Kuni requires GCC 15+. Found: ${CMAKE_CXX_COMPILER_VERSION}. Please upgrade your compiler.")
+    endif()
+elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
+    if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS 20)
+        message(FATAL_ERROR "Kuni requires Clang 20+. Found: ${CMAKE_CXX_COMPILER_VERSION} (${CMAKE_CXX_COMPILER_ID}). Please upgrade your compiler.")
+    endif()
+elseif(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+    if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS 19.28)
+        message(FATAL_ERROR "Kuni requires MSVC 19.28+. Found: ${CMAKE_CXX_COMPILER_VERSION}. Please upgrade your compiler.")
+    endif()
+else()
+    message(WARNING "Unknown compiler: ${CMAKE_CXX_COMPILER_ID}. Build may fail if compiler does not support C++20 coroutines.")
+endif()
+
+
 
 
 option(BUILD_SHARED_LIBS OFF)
