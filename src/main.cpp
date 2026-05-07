@@ -666,7 +666,11 @@ Use absolute time in your queries.
                 }
 
                 context += "\n\n</context>\n\nPhoto:\n\n";
-                context += OpenAIChat::embedImage(*AImage::fromFile(pathToImage));
+                auto image = AImage::fromFile(pathToImage);
+                if (image == nullptr) {
+                    co_return mImages[pathToImage] = "This media type is not supported";
+                }
+                context += OpenAIChat::embedImage(*image);
                 context += "\n\nDescribe the last photo.";
 
                 auto response = co_await chat.chat(std::move(context));
