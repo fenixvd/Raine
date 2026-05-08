@@ -1299,14 +1299,22 @@ Some channels have reactions enabled. In that case, you can sometimes react with
                             // stupid AI can't recognize it spams messages despite the warning
                             throw AException("Too many messages in a row. Don't spam!");
                         }
-                        mTelegram->sendQuery(TelegramClient::toPtr(td::td_api::sendChatAction(chat->id_, {}, {}, TelegramClient::toPtr(td::td_api::chatActionTyping()))));
+
+                        auto isTyping = _new<std::atomic_bool>(true);
+                        auto typingCoro = [](_<TelegramClient> telegram, int64_t chatId, _<std::atomic_bool> isTyping) -> AFuture<> {
+                            while (isTyping->load()) {
+                                telegram->sendQuery(TelegramClient::toPtr(td::td_api::sendChatAction(chatId, {}, {}, TelegramClient::toPtr(td::td_api::chatActionTyping()))));
+                                co_await AThread::asyncSleep(500ms);
+                            }
+                        }(telegram(), chat->id_, isTyping);
+                        AUI_DEFER { isTyping->store(false); };
 
                         if (ctx.args.contains("chat_id")) {
                             if (ctx.args["chat_id"].asLongInt() != chat->id_) {
                                 co_return "Error: you can't send messages to other chats. Open them first. You are currently in chat \"{}\""_format(chat->title_);
                             }
                         }
-                        const auto message = ctx.args["text"].asStringOpt().valueOr("");
+                        const auto message = ctx.args["text"].asStringOpt().valueOr("").replaceAll("\r", "");
                         const auto photoFilename = ctx.args["photo_filename"].asStringOpt().valueOr("");
                         const auto audioFilename = ctx.args["audio_filename"].asStringOpt().valueOr("");
                         const auto replyTo = ctx.args["reply_to_message_id"].asLongIntOpt().valueOr(0);
@@ -1316,16 +1324,6 @@ Some channels have reactions enabled. In that case, you can sometimes react with
                         }
                         if (!photoFilename.empty() && !audioFilename.empty()) {
                             throw AException("Cannot attach both photo and audio in a single message");
-                        }
-
-                        if (message.contains("\n\n")) {
-                            if (!message.contains("```")) {
-                                // despite the prompt, stupid af LLM still often sends big unnatural messages.
-                                // once LLM receives this error message he is like "oh. the system suggests splitting
-                                // messages properly. it is even noted in my system prompt" and does the job right
-                                throw AException("do not split sentences into paragraphs (\n\n). Instead, "
-                                    "send multiple messages by subsequent #send_telegram_message calls");
-                            }
                         }
 
                         if (photoFilename.empty() && audioFilename.empty()) {
@@ -1481,15 +1479,6 @@ Some channels have reactions enabled. In that case, you can sometimes react with
                         }
 
 
-                        mTelegram->sendQuery(TelegramClient::toPtr(td::td_api::sendChatAction(chat->id_, {}, {}, TelegramClient::toPtr(td::td_api::chatActionTyping()))));
-
-                        // random wait. You definitely don't want to receive 4 large messages in 1 sec right?
-                        static std::default_random_engine re(std::chrono::high_resolution_clock::now().time_since_epoch().count());
-                        static std::uniform_int_distribution<int> dist(10, 50);
-                        co_await AThread::asyncSleep((message.length() + 1) * dist(re) * 1ms);
-
-                        mTelegram->sendQuery(TelegramClient::toPtr(td::td_api::sendChatAction(chat->id_, {}, {}, TelegramClient::toPtr(td::td_api::chatActionTyping()))));
-
                         // handle photo_filename
                         AOptional<_<AImage>> photo;
                         if (!photoFilename.empty()) {
@@ -1517,17 +1506,37 @@ Some channels have reactions enabled. In that case, you can sometimes react with
                             audioPath = candidatePath;
                         }
 
+                        auto simulateTypingDelay = [](size_t messageLength) {
+                            // random wait. You definitely don't want to receive 4 large messages in 1 sec right?
+                            static std::default_random_engine re(std::chrono::high_resolution_clock::now().time_since_epoch().count());
+                            static std::uniform_int_distribution<int> dist(10, 50);
+                            return AThread::asyncSleep((messageLength + 1) * dist(re) * 1ms);
+                        };
+
                         // actually send a message. we don't really need to wait until tdlib reports message sent
                         // successfully (this is exactly when in telegram desktop the message status changes from clock
                         // to one tick).
                         // however, if something goes wrong, this is reported as an exception to LLM and it will know
                         // that a technical issue appeared during sending the message (i.e., LLMs bot was banned)
-                        co_await telegramPostMessage(chat->id_, message, std::move(photo), std::move(audioPath), replyTo);
+                        if (message.contains("\n") && !message.contains("```")) {
+                            // despite the prompt, stupid af LLM still often sends big unnatural messages.
+                            // we will split manually.
 
-                        // indicate that bot is typing once again; this would feel natural if llm sends series of
-                        // messages.
-                        // if not, `chat` will send chat action nullptr and close the chat in dtor.
-                        mTelegram->sendQuery(TelegramClient::toPtr(td::td_api::sendChatAction(chat->id_, {}, {}, TelegramClient::toPtr(td::td_api::chatActionTyping()))));
+                            for (auto line : message.split("\n")) {
+                                co_await simulateTypingDelay(line.length());
+                                // std::exchange: we want all attachments go to the first message.
+                                co_await telegramPostMessage(chat->id_,
+                                                             std::move(line),
+                                                             std::exchange(photo, {}),
+                                                             std::exchange(audioPath, {}),
+                                                             replyTo);
+                            }
+                        } else {
+                            co_await simulateTypingDelay(message.length());
+                            co_await telegramPostMessage(chat->id_, message, std::move(photo), std::move(audioPath), replyTo);
+                        }
+
+
                         ALOG_DEBUG(LOG_TAG) << "Sent message: " << message;
 
                         ++*messagesInRow;
