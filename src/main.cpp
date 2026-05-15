@@ -518,6 +518,16 @@ AUI_ENTRY {
         ALogger::info(LOG_TAG) << "Waiting for Telegram network...";
         co_await telegram->waitForConnection();
         ALogger::info(LOG_TAG) << "Connected to Telegram";
+        switch (config::LOCKDOWN_MODE) {
+            case config::LockdownMode::NONE:
+                break;
+            case config::LockdownMode::CONTACTS_ONLY:
+                ALogger::info(LOG_TAG) << "Lockdown mode is enabled (config.h LOCKDOWN_MODE). Kuni can only chat with her contacts.";
+                break;
+            case config::LockdownMode::PAPIK_ONLY:
+                ALogger::info(LOG_TAG) << "Lockdown mode is enabled (config.h LOCKDOWN_MODE). Kuni can only open chat with ID {} (PAPIK_CHAT_ID)."_format(config::PAPIK_CHAT_ID);
+                break;
+        }
         // app->actProactively(); // for tests
     }(telegram);
 
