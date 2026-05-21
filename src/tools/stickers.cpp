@@ -4,6 +4,8 @@
 
 #include "stickers.h"
 
+#include <range/v3/all.hpp>
+
 #include "llmui/audio.h"
 #include "llmui/image.h"
 #include "llmui/malicious_payloads.h"
@@ -11,7 +13,6 @@
 #include "util/is_accessible_from_lockdown.h"
 #include "util/json_utils.h"
 
-#include <range/v3/algorithm/find_if.hpp>
 
 static constexpr auto LOG_TAG = "tools::stickers";
 
@@ -20,11 +21,21 @@ AMap<int64_t, td::td_api::object_ptr<td::td_api::sticker>>& tools::stickers::kno
     return result;
 }
 
+static AFuture<AVector<td::td_api::object_ptr<td::td_api::sticker>>> getSavedStickers(ITelegramClient& telegram) {
+    // a combination of favorite + recent stickers gives total storage for 30-40 stickers.
+    auto favoriteStickers = co_await telegram.sendQueryWithResult(ITelegramClient::toPtr(td::td_api::getFavoriteStickers()));
+    auto recentStickers = co_await telegram.sendQueryWithResult(ITelegramClient::toPtr(td::td_api::getRecentStickers()));
+    AVector<td::td_api::object_ptr<td::td_api::sticker>> out;
+    out << std::move(favoriteStickers->stickers_);
+    out << std::move(recentStickers->stickers_);
+    co_return out;
+}
+
 AFuture<AString> llmui::listFavoriteStickers(ITelegramClient& telegram, IOpenAIChat& openAI) {
     AString out;
     auto favoriteStickers =
         co_await telegram.sendQueryWithResult(ITelegramClient::toPtr(td::td_api::getFavoriteStickers()));
-    for (auto& sticker : favoriteStickers->stickers_) {
+    for (auto& sticker : co_await getSavedStickers(telegram)) {
         llmui::checkForMaliciousPayloads(sticker->emoji_);
         const auto xmlTag =
             "sticker sticker_id=\"{}\" emoji=\"{}\""_format(sticker->id_, sticker->emoji_);
@@ -104,11 +115,11 @@ OpenAITools::Tool tools::stickers::send(_<ITelegramClient> telegram, _<td::td_ap
                 co_return "Error: lockdown mode is enabled.";
             }
 
-            auto favoriteStickers = co_await telegram->sendQueryWithResult(ITelegramClient::toPtr(td::td_api::getFavoriteStickers()));
-            auto stickerIt = ranges::find_if(favoriteStickers->stickers_, [&](const td::td_api::object_ptr<td::td_api::sticker>& sticker) {
+            auto favoriteStickers = co_await getSavedStickers(*telegram);
+            auto stickerIt = ranges::find_if(favoriteStickers, [&](const td::td_api::object_ptr<td::td_api::sticker>& sticker) {
                 return sticker->id_ == stickerId;
             });
-            if (stickerIt == favoriteStickers->stickers_.end()) {
+            if (stickerIt == favoriteStickers.end()) {
                 co_return "Error: was not saved; you should have used #sticker_save beforehand";
             }
             td::td_api::sticker& sticker = **stickerIt;
