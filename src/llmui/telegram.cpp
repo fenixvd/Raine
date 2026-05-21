@@ -120,7 +120,6 @@ AString llmui::extractMessageTypeAndText(td::td_api::message& msg) {
                   out += "\n\n" + to_string(text.link_preview_) + "\n";
               }
           },
-          // ... existing code ...
           [&](td::td_api::messagePhoto& photo) {
               out += "[photo]";
               if (photo.caption_) {
@@ -186,7 +185,7 @@ AString llmui::extractMessageTypeAndText(td::td_api::message& msg) {
           },
           [&](td::td_api::messageDice& dice) { out += "[dice] {} = "_format(dice.emoji_, dice.value_); },
           [&](td::td_api::messageCall& call) {
-              out += "[call] " + AString(call.is_video_ ? "video" : "voice") + " call";
+              out += "<call is_video=\"{}\" duration=\"{}\" />"_format(call.is_video_, call.duration_);
           },
           [&](td::td_api::messageChatAddMembers& add) {
               out += "[members added] " + AString::number(add.member_user_ids_.size()) + " member(s)";
@@ -208,7 +207,125 @@ AString llmui::extractMessageTypeAndText(td::td_api::message& msg) {
           [&](td::td_api::messageScreenshotTaken&) { out += "[screenshot taken]"; },
           [&](td::td_api::messageProximityAlertTriggered&) { out += "[proximity alert]"; },
           [&](td::td_api::messageUnsupported&) { out += "[unsupported message]"; },
-          []<typename T>(T&) { static_assert(sizeof(T) > 0, "Unknown message type"); },
+          // Media messages
+          [&](td::td_api::messagePaidMedia&) { out += "[paid media]"; },
+          // Expired media
+          [&](td::td_api::messageExpiredPhoto&) { out += "[expired photo]"; },
+          [&](td::td_api::messageExpiredVideo&) { out += "[expired video]"; },
+          [&](td::td_api::messageExpiredVideoNote&) { out += "[expired video note]"; },
+          [&](td::td_api::messageExpiredVoiceNote&) { out += "[expired voice note]"; },
+          // Emoji messages
+          [&](td::td_api::messageAnimatedEmoji&) { out += "[animated emoji]"; },
+          // Game/stakes messages
+          [&](td::td_api::messageStakeDice&) { out += "[stake dice]"; },
+          [&](td::td_api::messageStory&) { out += "[story]"; },
+          // Checklist
+          [&](td::td_api::messageChecklist&) { out += "[checklist]"; },
+          // Group calls
+          [&](td::td_api::messageGroupCall&) { out += "[group call]"; },
+          [&](td::td_api::messageVideoChatScheduled&) { out += "[video chat scheduled]"; },
+          [&](td::td_api::messageVideoChatStarted&) { out += "[video chat started]"; },
+          [&](td::td_api::messageVideoChatEnded&) { out += "[video chat ended]"; },
+          [&](td::td_api::messageInviteVideoChatParticipants&) { out += "[invited to video chat]"; },
+          // Chat management
+          [&](td::td_api::messageChatDeletePhoto&) { out += "[chat photo deleted]"; },
+          [&](td::td_api::messageChatOwnerLeft&) { out += "[chat owner left]"; },
+          [&](td::td_api::messageChatOwnerChanged&) { out += "[chat owner changed]"; },
+          [&](td::td_api::messageChatHasProtectedContentToggled&) { out += "[protected content toggled]"; },
+          [&](td::td_api::messageChatHasProtectedContentDisableRequested&) { out += "[protected content disable requested]"; },
+          [&](td::td_api::messageChatUpgradeTo&) { out += "[upgraded to supergroup]"; },
+          [&](td::td_api::messageChatUpgradeFrom&) { out += "[upgraded from group]"; },
+          [&](td::td_api::messageChatSetMessageAutoDeleteTime&) { out += "[auto-delete time set]"; },
+          [&](td::td_api::messageChatBoost&) { out += "[chat boost]"; },
+          // Forum topics
+          [&](td::td_api::messageForumTopicCreated&) { out += "[forum topic created]"; },
+          [&](td::td_api::messageForumTopicEdited&) { out += "[forum topic edited]"; },
+          [&](td::td_api::messageForumTopicIsClosedToggled&) { out += "[forum topic closed toggled]"; },
+          [&](td::td_api::messageForumTopicIsHiddenToggled&) { out += "[forum topic hidden toggled]"; },
+          // User suggestions
+          [&](td::td_api::messageSuggestProfilePhoto&) { out += "[suggest profile photo]"; },
+          [&](td::td_api::messageSuggestBirthdate&) { out += "[suggest birthdate]"; },
+          // Service messages
+          [&](td::td_api::messageCustomServiceAction&) { out += "[custom service action]"; },
+          [&](td::td_api::messageGameScore& score) {
+              out += "<game_score score=\"{}\" />"_format(score.score_);
+          },
+          // Payment messages
+          [&](td::td_api::messagePaymentSuccessful& payment) {
+              out += "<payment_successful currency=\"{}\" amount=\"{}\" is_recurring=\"{}\" />"_format(payment.currency_, payment.total_amount_, payment.is_recurring_);
+          },
+          [&](td::td_api::messagePaymentSuccessfulBot& payment) {
+              out += "<payment_successful_bot currency=\"{}\" amount=\"{}\" is_recurring=\"{}\" />"_format(payment.currency_, payment.total_amount_, payment.is_recurring_);
+          },
+          [&](td::td_api::messagePaymentRefunded& refund) { out += "[payment refunded]"; },
+          // Premium/gifts
+          [&](td::td_api::messageGiftedPremium& premium) {
+              out += "<gifted_premium months=\"{}\" days=\"{}\" amount=\"{}\" currency=\"{}\" />"_format(premium.month_count_, premium.day_count_, premium.amount_, premium.currency_);
+          },
+          [&](td::td_api::messagePremiumGiftCode& code) { out += "[premium gift code]"; },
+          // Giveaways
+          [&](td::td_api::messageGiveawayCreated&) { out += "[giveaway created]"; },
+          [&](td::td_api::messageGiveaway&) { out += "[giveaway]"; },
+          [&](td::td_api::messageGiveawayCompleted& completed) {
+              out += "<giveaway_completed winners=\"{}\" unclaimed=\"{}\" is_star_giveaway=\"{}\" />"_format(completed.winner_count_, completed.unclaimed_prize_count_, completed.is_star_giveaway_);
+          },
+          [&](td::td_api::messageGiveawayWinners& winners) {
+              out += "<giveaway_winners count=\"{}\" unclaimed=\"{}\" additional_chats=\"{}\" />"_format(winners.winner_count_, winners.unclaimed_prize_count_, winners.additional_chat_count_);
+          },
+          // Stars/gifts
+          [&](td::td_api::messageGiftedStars& stars) {
+              out += "<gifted_stars count=\"{}\" />"_format(stars.star_count_);
+          },
+          [&](td::td_api::messageGiftedTon& ton) {
+              out += "<gifted_ton amount=\"{}\" />"_format(ton.ton_amount_);
+          },
+          [&](td::td_api::messageGiveawayPrizeStars& prize) {
+              out += "<giveaway_prize_stars count=\"{}\" />"_format(prize.star_count_);
+          },
+          [&](td::td_api::messageGift& gift) {
+              out += "[gift]";
+          },
+          [&](td::td_api::messageUpgradedGift&) { out += "[upgraded gift]"; },
+          [&](td::td_api::messageRefundedUpgradedGift&) { out += "[refunded upgraded gift]"; },
+          [&](td::td_api::messageUpgradedGiftPurchaseOffer&) { out += "[upgraded gift purchase offer]"; },
+          [&](td::td_api::messageUpgradedGiftPurchaseOfferRejected&) { out += "[upgraded gift purchase offer rejected]"; },
+          // Paid messages
+          [&](td::td_api::messagePaidMessagesRefunded& refund) {
+              out += "<paid_messages_refunded count=\"{}\" stars=\"{}\" />"_format(refund.message_count_, refund.star_count_);
+          },
+          [&](td::td_api::messagePaidMessagePriceChanged& price) {
+              out += "<paid_message_price_changed stars=\"{}\" />"_format(price.paid_message_star_count_);
+          },
+          [&](td::td_api::messageDirectMessagePriceChanged& price) {
+              out += "<direct_message_price_changed enabled=\"{}\" stars=\"{}\" />"_format(price.is_enabled_, price.paid_message_star_count_);
+          },
+          // Checklist tasks
+          [&](td::td_api::messageChecklistTasksDone& done) {
+              out += "<checklist_tasks_done done=\"{}\" not_done=\"{}\" />"_format(done.marked_as_done_task_ids_.size(), done.marked_as_not_done_task_ids_.size());
+          },
+          [&](td::td_api::messageChecklistTasksAdded& added) {
+              out += "<checklist_tasks_added count=\"{}\" />"_format(added.tasks_.size());
+          },
+          // Suggested posts
+          [&](td::td_api::messageSuggestedPostApprovalFailed&) { out += "[suggested post approval failed]"; },
+          [&](td::td_api::messageSuggestedPostApproved&) { out += "[suggested post approved]"; },
+          [&](td::td_api::messageSuggestedPostDeclined&) { out += "[suggested post declined]"; },
+          [&](td::td_api::messageSuggestedPostPaid&) { out += "[suggested post paid]"; },
+          [&](td::td_api::messageSuggestedPostRefunded&) { out += "[suggested post refunded]"; },
+          // User interactions
+          [&](td::td_api::messageContactRegistered&) { out += "[contact registered]"; },
+          [&](td::td_api::messageUsersShared& shared) {
+              out += "<users_shared count=\"{}\" />"_format(shared.users_.size());
+          },
+          [&](td::td_api::messageChatShared&) { out += "[chat shared]"; },
+          [&](td::td_api::messageBotWriteAccessAllowed&) { out += "[bot write access allowed]"; },
+          // Web app
+          [&](td::td_api::messageWebAppDataSent&) { out += "[web app data sent]"; },
+          [&](td::td_api::messageWebAppDataReceived&) { out += "[web app data received]"; },
+          // Passport
+          [&](td::td_api::messagePassportDataReceived&) { out += "[passport data received]"; },
+          [&](td::td_api::messagePassportDataSent&) { out += "[passport data sent]"; },
+          []<typename T>(T&) { static_assert(sizeof(T) == 0, "Missing handlers"); },
         });
     return out;
 }
@@ -360,6 +477,27 @@ AFuture<AString> llmui::formatChatHistoryMessage(
             }
             const auto id = sticker.sticker_->id_;
             tools::stickers::knownStickers()[id] = std::move(sticker.sticker_);
+        }
+
+        if (msg.content_->get_id() == td::td_api::messageGift::ID) {
+            auto& gift = static_cast<td::td_api::messageGift&>(*msg.content_);
+            auto xmlTag = "gift cost=\"{} stars\""_format(gift.gift_->star_count_);
+            if (gift.text_) {
+                checkForMaliciousPayloads(gift.text_->text_);
+                xmlTag += " text=\"" + gift.text_->text_ + "\"";
+            }
+
+            if (gift.gift_->sticker_) {
+                if (!gift.gift_->sticker_->emoji_.empty()) {
+                    checkForMaliciousPayloads(gift.gift_->sticker_->emoji_);
+                    xmlTag += " emoji=\"{}\""_format(gift.gift_->sticker_->emoji_);
+                }
+
+                result += co_await llmui::image(
+                    temporaryContext, openAI, co_await fetchMedia(telegram, gift.gift_->sticker_->sticker_), xmlTag);
+            } else {
+                result += "<{} />"_format(xmlTag);
+            }
         }
 
         if (msg.content_->get_id() == td::td_api::messageAnimation::ID) {
