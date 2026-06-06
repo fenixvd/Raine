@@ -13,10 +13,7 @@
 #include "IOpenAIChat.h"
 #include "util/cosine_similarity.h"
 
-#include <range/v3/algorithm/sort.hpp>
-#include <range/v3/range/conversion.hpp>
-#include <range/v3/view/enumerate.hpp>
-#include <range/v3/view/transform.hpp>
+#include <range/v3/all.hpp>
 
 #include "OpenAITools.h"
 
@@ -345,19 +342,20 @@ AFuture<AString> Diary::queryAI(const AString& query, QueryOpts opts) {
             },
             .handler = [this, opts, &includedIds](OpenAITools::Ctx ctx) -> AFuture<AString> {
                 auto cue = ctx.args["text"].asStringOpt().valueOrException("text is required string");
-                auto diaryResponse = co_await this->query(co_await openAI()->embedding({ .config = config::ENDPOINT_EMBEDDING }, cue), opts);
-                AString formattedResponse;
+                auto diaryResponse = co_await this->query(co_await openAI()->embedding({ .config = config::ENDPOINT_EMBEDDING }, cue), [&] {
+                    auto optsCopy = opts;
+                    optsCopy.maxEntryCount *= 10;
+                    return optsCopy;
+                }());
+                diaryResponse = diaryResponse | ranges::view::filter([&](const EntryExAndRelatedness& e) {
+                    return !includedIds.contains(e.entry->id);
+                }) | ranges::view::take(opts.maxEntryCount) | ranges::to_vector;
+
                 ALOG_DEBUG("Diary") << "queryAI cue=\"" << cue << "\" found=" << (diaryResponse | ranges::view::transform([&](const EntryExAndRelatedness& e) -> AString {
-                    if (includedIds.contains(e.entry->id)) {
-                        return "";
-                    }
                     return "({}.md,relatedness={})"_format(e.entry->id, e.relatedness);
                 }));
+                AString formattedResponse;
                 for (const auto& i : diaryResponse) {
-                    if (includedIds.contains(i.entry->id)) {
-                        continue;
-                    }
-
                     i.entry->metadata.score += (i.relatedness - 0.5f) * 2.f;
                     i.entry->incrementUsageCount();
                     save(*i.entry);
