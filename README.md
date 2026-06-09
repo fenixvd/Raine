@@ -300,6 +300,18 @@ The file includes:
 
 Both files are located in the working directory and can be edited to customize Kuni's personality and appearance. Changes take effect on the next application restart.
 
+> ⚠️ **Important — do not edit the source code to change the prompts.**
+>
+> The default prompt text is embedded in `src/KuniCharacter.cpp` solely as a **one-time seed**: it is written to disk
+> on the very first run (when the file does not yet exist) and is **completely ignored** afterwards.
+> Any edits you make to those strings in the C++ source will therefore have no effect once the external files exist.
+>
+> **Always customise the character by editing the generated files directly:**
+> - `character_base.md` — personality, background, philosophical foundation
+> - `character_appearance.md` — visual description and Stable Diffusion prompts
+>
+
+
 ## Notes
 1. The project uses **coroutines** extensively (C++20 feature)
 2. **Telegram authentication** will be interactive on first run
