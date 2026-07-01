@@ -11,10 +11,10 @@ static constexpr auto LOG_TAG = "tools::forwardMessage";
 OpenAITools::Tool tools::forwardMessage(_<ITelegramClient> telegram, _<td::td_api::chat> fromChat) {
     return {
         .name = "forward_message",
-        .description = "Forwards one or more messages from the currently opened channel to another chat (e.g., to a friend, "
-                       "a group, or to Saved Messages). Use this when you find a post in a channel interesting "
-                       "enough to share. You can optionally add a comment that will be sent as a separate message "
-                       "after the forward.",
+        .description = "Forwards one or more messages from \"{}\" to another chat (e.g., to a friend, "
+                       "a group, or to Saved Messages). Use this when you find a post in a channel/a message in PM "
+                       "interesting enough to share. You can optionally add a comment that will be sent as a separate "
+                       "interesting after the forward."_format(fromChat->title_),
         .parameters = {
             .properties = {
                 {"message_ids", {
@@ -52,6 +52,15 @@ OpenAITools::Tool tools::forwardMessage(_<ITelegramClient> telegram, _<td::td_ap
             ALogger::info(LOG_TAG) << "Forwarding " << messageCount << " message(s)"
                                    << " from chat " << fromChat->id_
                                    << " to chat " << toChatId;
+
+            for (auto messageId : messageIds) {
+                try {
+                    // just check if provided messages are
+                    co_await telegram->getMessage(fromChat->id_, messageId);
+                } catch (const AException& e) {
+                    co_return "Error: message {} was not found in \"{}\" chat."_format(messageId, fromChat->title_);
+                }
+            }
 
             auto fwd = td::td_api::make_object<td::td_api::forwardMessages>();
             fwd->chat_id_      = toChatId;

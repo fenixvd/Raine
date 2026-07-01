@@ -31,12 +31,12 @@ AFuture<AString> importantThingsToRemember(IOpenAIChat& openAI, IOpenAIChat::Ses
               "- reminders\n"
               "- unfinished tasks\n"
               "- responsibilities\n"
-              "- Kuni's current emotional state: sad, arousal, betrayed, grief, sorrow, pensiveness, anger, annoyed, "
+              "- {}'s current emotional state: sad, arousal, betrayed, grief, sorrow, pensiveness, anger, annoyed, "
               "  fear, amazement, surprise, distracted, love, trust, accepted, joy, serenity, embarrassed, proud, "
               "  envious, jealous, grateful, disappointed, hopeful, lonely, nostalgic, relieved, resentful\n"
-              "- Kuni's current physical state: energetic, tired, exhausted, sleepy, restless, tense, relaxed, "
+              "- {}'s current physical state: energetic, tired, exhausted, sleepy, restless, tense, relaxed, "
               "  hungry, thirsty, sore, dizzy, nauseous, feverish, cold, warm, comfortable, uncomfortable, "
-              "  in_pain, injured, healthy, sick, weak, stiff, trembling, numb, cold, warm, wet, dry\n"
+              "  in_pain, injured, healthy, sick, weak, stiff, trembling, numb, wet, dry, stimulated\n"
               "- other important details\n"
               "In your response, you must include previous <things_to_remember></things_to_remember>. DO NOT ALTER "
               "THEIR DESCRIPTION, thought you can expand them. You should not include older, "
@@ -47,7 +47,7 @@ AFuture<AString> importantThingsToRemember(IOpenAIChat& openAI, IOpenAIChat::Ses
               "- Напомнить Алексею про оплату хостинга до 15 мая — последнее обновление: Apr 28\n"
               "- Жду ответ от Марии по поводу встречи в пятницу — последнее обновление: Apr 29\n"
               "- Обещала скинуть рецепт пасты Коду — последнее обновление: Apr 27\n"
-              "- Проверить статус заказа на Ozon — последнее обновление: Apr 25\n";
+              "- Проверить статус заказа на Ozon — последнее обновление: Apr 25\n"_format(config().characterName, config().characterName);
 
     context << IOpenAIChat::Message {
         .role = IOpenAIChat::Message::Role::USER,
