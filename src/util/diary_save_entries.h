@@ -69,6 +69,11 @@ diarySaveEntries(Diary& diary, IOpenAIChat::Session context, IOpenAIChat::Params
 naxyi:
     IOpenAIChat::Response botAnswer = co_await diary.openAI()->chat(chatParams, context);
     if (botAnswer.choices.at(0).message.content.empty()) {
+        context << std::move(botAnswer.choices.at(0).message);
+        context << IOpenAIChat::Message {
+            .role = IOpenAIChat::Message::Role::USER,
+            .content = "Tools are not available; write the summary without tools.",
+        };
         goto naxyi;
     }
     context << botAnswer.choices.at(0).message;
