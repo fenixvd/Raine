@@ -37,6 +37,7 @@
   X(std::chrono::seconds, requestTimeoutSecs, std::chrono::seconds(30), "misc.request_timeout_secs") \
   X(size_t, videoMaxFrames, 16, "misc.video_max_frames") \
   X(size_t, videoMinStepMs, 1000, "misc.video_min_step_ms") \
+  X(bool, remindUseAsk, true, "misc.remind_use_ask") \
   X(bool, capabilityWebSearch, false, "capabilities.web_search.enabled") \
   X(AString, webSearchOllamaKey, "", "capabilities.web_search.ollama_bearer_key") \
   X(bool, capabilityVision, false, "capabilities.vision.enabled") \

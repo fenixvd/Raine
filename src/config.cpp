@@ -370,6 +370,11 @@ static const std::unordered_map<AStringView, AStringView> CONFIG_COMMENTS = {
       "When enabled, Kuni exposes an API endpoint that forwards requests through her LLM,\n"
       "allowing external tools (e.g. VS Code Copilot) to use Kuni as a model backend.",
     },
+    {
+        "misc.remind_use_ask",
+        "Remind to use #ask tool (main RAG fetch) more proactively.\n"
+        "Some LLMs forget about using this. If true, the system inserts reminders if LLM doesn't use #ask."
+    },
 };
 
 static constexpr auto CONFIG_TOML = "config.toml";
