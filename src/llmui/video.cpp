@@ -483,7 +483,7 @@ AFuture<AString> llmui::video(std::span<const IOpenAIChat::Message> temporaryCon
 #ifndef AUI_TESTS_MODULE
         if (cache.isRegularFileExists()) {
             auto content = AString::fromUtf8(AByteBuffer::fromStream(AFileInputStream(cache)));
-            co_return "<{} transcription>\n{}\n</{}>"_format(xmlTag, std::move(content), xmlTag);
+            co_return "<{} transcription>\n{}\n</{} transcription instructions=\"You finished watching this video and you should acknowledge about it's contents shown above.\">"_format(xmlTag, std::move(content), xmlTag);
         }
 #endif
 
@@ -498,9 +498,9 @@ AFuture<AString> llmui::video(std::span<const IOpenAIChat::Message> temporaryCon
         AVector<Frame> mergedFrames;
         mergedFrames.reserve(frames.size());
         for (auto& f : frames) {
-            if (!mergedFrames.empty() && mergedFrames.back().track == f.track) {
+            if (!mergedFrames.empty() && mergedFrames.back().track == "audio" && f.track == "audio") {
                 mergedFrames.back().to = f.to;
-                mergedFrames.back().contents += " ";
+                mergedFrames.back().contents += "\n\n";
                 mergedFrames.back().contents += f.contents;
             } else {
                 mergedFrames.push_back(std::move(f));
@@ -519,7 +519,7 @@ AFuture<AString> llmui::video(std::span<const IOpenAIChat::Message> temporaryCon
         }
 
         AFileOutputStream(cache) << static_cast<AString&>(result);
-        co_return "<{} description>\n{}\n</{}>"_format(xmlTag, std::move(result), xmlTag);
+        co_return "<{} transcription>\n{}\n</{} transcription instructions=\"You finished watching this video and you should acknowledge about it's contents shown above.\">"_format(xmlTag, std::move(result), xmlTag);
 
     } catch (const AException& e) {
         ALogger::err(LOG_TAG) << "Can't describe video: " << e;
