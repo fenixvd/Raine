@@ -8,6 +8,8 @@ bin
 config.toml
 tdlib/
 data/
+logs/
 logs_proxy/
+last_query.json
 image_generator_tmp.png
 pic/
