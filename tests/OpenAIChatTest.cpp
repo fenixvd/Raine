@@ -474,3 +474,35 @@ TEST(OpenAIChat, MessageToJsonToolCall) {
     EXPECT_EQ(json[0]["tool_calls"][0]["id"].asString(), "call_1");
     EXPECT_EQ(json[0]["tool_calls"][0]["function"]["name"].asString(), "test_tool");
 }
+
+TEST(OpenAIChat, ParseResponseUsageNull) {
+    // OpenAI-compatible streaming endpoints (e.g. gpt-4o-mini) send `"usage": null` in every
+    // chunk but the last one. Parsing must not throw; usage stays zeroed.
+    static constexpr auto R = R"(
+{
+  "id": "chatcmpl-308",
+  "object": "chat.completion.chunk",
+  "created": 1777529963,
+  "model": "gpt-4o-mini",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "hi"
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": null
+}
+)";
+    auto response = aui::from_json<IOpenAIChat::Response>(AJson::fromString(R));
+    EXPECT_EQ(response.model, "gpt-4o-mini");
+    EXPECT_EQ(response.choices.at(0).message.content, "hi");
+    EXPECT_EQ(response.usage.prompt_tokens, 0);
+    EXPECT_EQ(response.usage.completion_tokens, 0);
+    EXPECT_EQ(response.usage.total_tokens, 0);
+    EXPECT_EQ(response.usage.prompt_cache_hit_tokens, 0);
+    EXPECT_EQ(response.usage.prompt_cache_miss_tokens, 0);
+}
