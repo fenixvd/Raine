@@ -7,9 +7,9 @@
 // clang-format off
 #define CONFIG_MODEL \
   X(AString, characterName, "Raine", "general.character_name") \
-  X(AString, characterNickname, "@raine", "general.character_nickname") \
-  X(AString, papikName, "Alex2772", "general.papik_name") \
-  X(std::int64_t, papikChatId, 625207005,"general.papik_chat_id") \
+  X(AString, characterNickname, "@raine_tyan", "general.character_nickname") \
+  X(AString, papikName, "RaineDev", "general.papik_name") \
+  X(std::int64_t, papikChatId, 1864770113,"general.papik_chat_id") \
   X(std::int64_t, telegramApiId, 0,"general.telegram_api_id") \
   X(AString,telegramApiHash, "", "general.telegram_api_hash") \
   X(EndpointAndModel, llm, (EndpointAndModel{.endpoint={"http://localhost:11434/v1/"},.model="deepseek-v4-flash"}), "general.llm") \
