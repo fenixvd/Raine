@@ -402,7 +402,21 @@ static const std::unordered_map<AStringView, AStringView> CONFIG_COMMENTS = {
     },
     {
       "capabilities.record_voice.openai.voice",
-      "OpenAI TTS voice name, e.g. \"alloy\", \"echo\", \"fable\", \"onyx\", \"nova\", \"shimmer\".",
+      "TTS voice name. For OpenAI: \"alloy\", \"nova\", \"shimmer\", etc.\n"
+      "For RouterAI Gemini (google/gemini-3.1-flash-tts-preview): \"Leda\" (young female),\n"
+      "\"Aoede\", \"Kore\", \"Zephyr\", \"Callirrhoe\", \"nova\".",
+    },
+    {
+      "capabilities.record_voice.openai.response_format",
+      "Audio format requested from the TTS endpoint.\n"
+      "- \"pcm\" — required by RouterAI Gemini; the raw PCM is transcoded to OGG/Opus via ffmpeg\n"
+      "  (ffmpeg must be installed) so Telegram accepts it as a voice note.\n"
+      "- \"mp3\" — for real OpenAI TTS and compatible providers.",
+    },
+    {
+      "capabilities.record_voice.openai.pcm_sample_rate",
+      "Sample rate (Hz) of the raw PCM returned by the TTS endpoint, used for ffmpeg transcoding.\n"
+      "Only relevant when response_format = \"pcm\". Gemini via RouterAI uses 24000.",
     },
     {
       "capabilities.proxy.enabled",

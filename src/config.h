@@ -12,8 +12,8 @@
   X(std::int64_t, papikChatId, 1864770113,"general.papik_chat_id") \
   X(std::int64_t, telegramApiId, 0,"general.telegram_api_id") \
   X(AString,telegramApiHash, "", "general.telegram_api_hash") \
-  X(EndpointAndModel, llm, (EndpointAndModel{.endpoint={"http://localhost:11434/v1/"},.model="deepseek-v4-flash"}), "general.llm") \
-  X(EndpointAndModel, embedding, (EndpointAndModel{.endpoint={"http://localhost:11434/v1/"},.model="qwen3-embedding"}), "general.embedding") \
+  X(EndpointAndModel, llm, (EndpointAndModel{.endpoint={"https://routerai.ru/api/v1/"},.model="deepseek/deepseek-v4-pro"}), "general.llm") \
+  X(EndpointAndModel, embedding, (EndpointAndModel{.endpoint={"https://routerai.ru/api/v1/"},.model="openai/text-embedding-3-large"}), "general.embedding") \
   X(::Config::LockdownMode, lockdown, ::Config::LockdownMode::PAPIK_ONLY, "general.lockdown") \
   X(bool, canWriteToANewPerson, false, "misc.can_write_to_a_new_person") \
   X(bool, wakeUpOnPinnedChat, false, "misc.wake_up_on_pinned_chat") \
@@ -38,25 +38,27 @@
   X(size_t, videoMinStepMs, 1000, "misc.video_min_step_ms") \
   X(bool, capabilityWebSearch, false, "capabilities.web_search.enabled") \
   X(AString, webSearchOllamaKey, "", "capabilities.web_search.ollama_bearer_key") \
-  X(bool, capabilityVision, false, "capabilities.vision.enabled") \
-  X(EndpointAndModel, llmImageToText, (EndpointAndModel{.endpoint={"http://localhost:11434/v1/"},.model="qwen3.5:9b"}), "capabilities.vision.llm_image_to_text") \
-  X(EndpointAndModel, llmImageToTextCheap, (EndpointAndModel{.endpoint={"http://localhost:11434/v1/"},.model="ministral-3:8b"}), "capabilities.vision.llm_image_to_text_cheap") \
+  X(bool, capabilityVision, true, "capabilities.vision.enabled") \
+  X(EndpointAndModel, llmImageToText, (EndpointAndModel{.endpoint={"https://routerai.ru/api/v1/"},.model="openai/gpt-5.6-luna-pro"}), "capabilities.vision.llm_image_to_text") \
+  X(EndpointAndModel, llmImageToTextCheap, (EndpointAndModel{.endpoint={"https://routerai.ru/api/v1/"},.model="qwen/qwen3.6-flash"}), "capabilities.vision.llm_image_to_text_cheap") \
   X(bool, capabilityUseStickers, false, "capabilities.use_stickers.enabled") \
-  X(bool, capabilityTakePhoto, false, "capabilities.take_photo.enabled") \
-  X(::Config::ImageBackend, imageBackend, ::Config::ImageBackend::A1111, "capabilities.take_photo.backend") \
+  X(bool, capabilityTakePhoto, true, "capabilities.take_photo.enabled") \
+  X(::Config::ImageBackend, imageBackend, ::Config::ImageBackend::OPENAI, "capabilities.take_photo.backend") \
   X(Endpoint, sdEndpoint, (Endpoint{.baseUrl="http://localhost:7860/"}),"capabilities.take_photo.sd.endpoint") \
   X(AString, sdCheckpoint, "novaAnimeXL_ilV170.safetensors", "capabilities.take_photo.sd.checkpoint") \
-  X(EndpointAndModel, imageOpenAI, (EndpointAndModel{.endpoint={"https://routerai.ru/api/v1/"},.model="black-forest-labs/flux.2-klein-4b"}), "capabilities.take_photo.openai_images") \
+  X(EndpointAndModel, imageOpenAI, (EndpointAndModel{.endpoint={"https://routerai.ru/api/v1/"},.model="black-forest-labs/flux.2-flex"}), "capabilities.take_photo.openai_images") \
   X(bool, capabilityHearing, false, "capabilities.hearing.enabled") \
   X(EndpointAndModel, llmAudioToText, (EndpointAndModel{.endpoint={"http://localhost:9000/v1/"},.model="base"}), "capabilities.hearing.llm_audio_to_text") \
-  X(bool, capabilityRecordVoice, false, "capabilities.record_voice.enabled") \
-  X(::Config::TTSBackend, recordVoiceBackend, ::Config::TTSBackend::ELEVENLABS, "capabilities.record_voice.backend") \
+  X(bool, capabilityRecordVoice, true, "capabilities.record_voice.enabled") \
+  X(::Config::TTSBackend, recordVoiceBackend, ::Config::TTSBackend::OPENAI, "capabilities.record_voice.backend") \
   X(AString, recordVoiceElevenLabsKey, "", "capabilities.record_voice.elevenlabs.key") \
   X(AString, recordVoiceElevenLabsVoice, "pPdl9cQBQq4p6mRkZy2Z", "capabilities.record_voice.elevenlabs.voice_id") \
-  X(AString, recordVoiceOpenAIUrl, "https://api.openai.com/v1/", "capabilities.record_voice.openai.url") \
+  X(AString, recordVoiceOpenAIUrl, "https://routerai.ru/api/v1/", "capabilities.record_voice.openai.url") \
   X(AString, recordVoiceOpenAIKey, "", "capabilities.record_voice.openai.key") \
-  X(AString, recordVoiceOpenAIModel, "tts-1", "capabilities.record_voice.openai.model") \
-  X(AString, recordVoiceOpenAIVoice, "alloy", "capabilities.record_voice.openai.voice") \
+  X(AString, recordVoiceOpenAIModel, "google/gemini-3.1-flash-tts-preview", "capabilities.record_voice.openai.model") \
+  X(AString, recordVoiceOpenAIVoice, "Leda", "capabilities.record_voice.openai.voice") \
+  X(AString, recordVoiceOpenAIFormat, "pcm", "capabilities.record_voice.openai.response_format") \
+  X(int, recordVoiceOpenAIPcmSampleRate, 24000, "capabilities.record_voice.openai.pcm_sample_rate") \
   X(bool, proxyEnabled, false, "capabilities.proxy.enabled") \
 
 // clang-format on
