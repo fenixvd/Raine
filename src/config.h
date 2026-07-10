@@ -6,8 +6,8 @@
 
 // clang-format off
 #define CONFIG_MODEL \
-  X(AString, characterName, "Kuni", "general.character_name") \
-  X(AString, characterNickname, "@kunii_chan", "general.character_nickname") \
+  X(AString, characterName, "Raine", "general.character_name") \
+  X(AString, characterNickname, "@raine", "general.character_nickname") \
   X(AString, papikName, "Alex2772", "general.papik_name") \
   X(std::int64_t, papikChatId, 625207005,"general.papik_chat_id") \
   X(std::int64_t, telegramApiId, 0,"general.telegram_api_id") \
