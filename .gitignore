@@ -3,3 +3,10 @@ cmake-build-**
 *uild*
 .DS_Store
 bin
+
+# secrets & runtime data — DO NOT COMMIT
+config.toml
+data/
+logs_proxy/
+image_generator_tmp.png
+pic/
