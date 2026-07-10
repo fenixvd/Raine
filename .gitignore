@@ -6,6 +6,7 @@ bin
 
 # secrets & runtime data — DO NOT COMMIT
 config.toml
+tdlib/
 data/
 logs_proxy/
 image_generator_tmp.png
