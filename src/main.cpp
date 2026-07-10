@@ -22,6 +22,7 @@
 #include "telegram/ITelegramClient.h"
 #include "telegram/TelegramClientImpl.h"
 #include "StableDiffusionClientImpl.h"
+#include "OpenAIImageClientImpl.h"
 #include "OpenAIChatImpl.h"
 #include "OpenAIChatMeasurable.h"
 #include "Prometheus.h"
@@ -147,7 +148,10 @@ protected:
     void updateTools(OpenAITools& actions) override {
         AppBase::updateTools(actions);
         if (config().capabilityTakePhoto) {
-            actions.insert(tools::takePhoto(_new<StableDiffusionClientImpl>(), openAI()));
+            _<IStableDiffusionClient> imageClient = config().imageBackend == Config::ImageBackend::OPENAI
+                ? _<IStableDiffusionClient>(_new<OpenAIImageClientImpl>())
+                : _<IStableDiffusionClient>(_new<StableDiffusionClientImpl>());
+            actions.insert(tools::takePhoto(std::move(imageClient), openAI()));
         }
         if (config().capabilityRecordVoice) {
             actions.insert(tools::recordAudio());

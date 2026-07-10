@@ -103,6 +103,32 @@ struct toml::into<Config::TTSBackend> {
     }
 };
 
+template <>
+struct toml::from<Config::ImageBackend> {
+    static Config::ImageBackend from_toml(const toml::value& v) {
+        const auto& str = v.as_string();
+        if (str == "a1111" || str == "sd")
+            return Config::ImageBackend::A1111;
+        if (str == "openai" || str == "flux")
+            return Config::ImageBackend::OPENAI;
+        throw AException("Invalid image backend: {}"_format(toml::format(v)));
+    }
+};
+
+template <>
+struct toml::into<Config::ImageBackend> {
+    template <typename T>
+    static toml::basic_value<T> into_toml(Config::ImageBackend backend) {
+        switch (backend) {
+            case Config::ImageBackend::A1111:
+                return "a1111";
+            case Config::ImageBackend::OPENAI:
+                return "openai";
+        }
+        throw AException("bad");
+    }
+};
+
 // Comments are set separately in config::get(), after toml is parsed.
 static const std::unordered_map<AStringView, AStringView> CONFIG_COMMENTS = {
     {
@@ -167,12 +193,30 @@ static const std::unordered_map<AStringView, AStringView> CONFIG_COMMENTS = {
       "Whether Kuni can generate new photos. Requires `vision` capability.",
     },
     {
+      "capabilities.take_photo.backend",
+      "Which image generation backend to use for photos.\n"
+      "- \"a1111\" — local/self-hosted Stable Diffusion WebUI (Automatic1111 API). Uses the\n"
+      "  [take_photo.sd] settings below (checkpoint, LoRA-style prompts).\n"
+      "- \"openai\" — an OpenAI-compatible images endpoint (v1/images/generations), e.g. FLUX via\n"
+      "  RouterAI or any other cloud aggregator. Uses the [take_photo.openai_images] settings.\n"
+      "  Note: negative prompts / samplers / LoRA are ignored by this backend.",
+    },
+    {
       "capabilities.take_photo.sd.endpoint",
-      "Address to stable-diffusion deployment (from docker-compose.yml)",
+      "Address to stable-diffusion deployment (from docker-compose.yml).\n"
+      "Only used when backend = \"a1111\".",
     },
     {
       "capabilities.take_photo.sd.checkpoint",
-      "Stable diffusion checkpoint. https://civitai.com/models/376130/nova-anime-xl",
+      "Stable diffusion checkpoint. https://civitai.com/models/376130/nova-anime-xl\n"
+      "Only used when backend = \"a1111\".",
+    },
+    {
+      "capabilities.take_photo.openai_images",
+      "OpenAI-compatible image generation endpoint and model.\n"
+      "Only used when backend = \"openai\".\n"
+      "- RouterAI (RU-friendly): endpoint.baseUrl = \"https://routerai.ru/api/v1/\", model = \"flux\"\n"
+      "- specify endpoint.bearerKey with your API key.",
     },
     {
       "capabilities.web_search.enabled",

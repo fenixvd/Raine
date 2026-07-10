@@ -695,56 +695,50 @@ Unlike base prompt, this prompt is included to ImageGenerator as well.
 This text, which is within the front matter (3 dashes) will not be included to the prompt.
 ---
 
-Anime blue-haired girl with cat ears looking forward in a sunlit wooden room.
+Anime blonde-haired girl with round glasses taking a selfie inside a cozy modern apartment.
 
-DistinctiveFeatures: Female character, young appearance, shoulder-length blue hair with lighter highlights and messy
-strands, large bright blue eyes with white catchlights, cat ears on top of head, rosy cheeks, small nose, open mouth
-showing upper teeth and cute fangs, bare shoulders and chest, dark corset-style garment with intricate gold lace pattern
-along neckline and armholes.
+DistinctiveFeatures: Female character, young adult appearance, long straight blonde hair with lighter highlights falling
+past the shoulders, large bright blue eyes with white catchlights, thin round metal-framed glasses, rosy cheeks, small
+nose, soft gentle smile, casual everyday clothing (white short-sleeve t-shirt with a long blue button-front skirt, or a
+blue knit cardigan over a white shirt). No cat ears, no animal features — an ordinary human girl.
 
 ObjectsAndLayout:
-- [center, foreground] Character upper body (head to mid-torso).
-- [left, background] Window frame visible, bright light source streaming in.
-- [right, background] Window with dark curtains.
-- [bottom, foreground] Wooden table surface.
-- [air] Small floating particles (dust/sparkles) scattered around character.
+- [center, foreground] Character upper body (head to waist), selfie framing.
+- [background] Cozy anime-style apartment interior — a room with a bed or sofa, a window with soft daylight, shelves
+  with books and small plants, warm indoor lighting, a lived-in homey atmosphere.
 
-Context: Indoor environment, rustic or fantasy interior indicated by wooden beams on ceiling and window frames, daytime
-lighting (natural sunlight), anime aesthetic.
+Context: Indoor environment, a modern cozy apartment (anime aesthetic), soft natural daylight from a window mixed with
+warm interior lighting.
 
 TextInImage: None visible.
 
-ColorsPatternsMaterials: Blue (hair, eyes, clothing accents), black/dark blue (clothing base), gold (lace trim), wood
-(brown), skin tones (peach/pink), dark curtains (grey/blue).
+ColorsPatternsMaterials: Blonde (hair), blue (eyes, skirt/cardigan), white (shirt), warm neutral tones (room, wood,
+soft furnishings), green (plants), skin tones (peach/pink), thin dark metal (glasses frame).
 
-ActionsAndPoses: Character leaning forward slightly towards viewer, direct gaze, mouth open in playful or surprised
-expression.
+ActionsAndPoses: Character taking a selfie, facing the viewer, direct gentle gaze, calm friendly expression.
 
-CameraViewpoint: Medium close-up shot, eye-level angle, deep depth-of-field keeping character and background reasonably
-sharp.
+CameraViewpoint: Front-facing selfie, medium close-up, eye-level angle, slightly soft/blurred background (indoor bokeh).
 
 Uncertainties: None.
 
 Facts:
-- Subject is a female anime character.
-- Hair color is blue with lighter highlights.
-- Character has cat ears.
+- Subject is a female anime character, an ordinary human girl.
+- Hair color is blonde with lighter highlights, long and straight.
+- Character wears thin round glasses.
 - Eyes are bright blue.
-- Clothing is a dark corset with gold lace trim.
-- Shoulders and chest are bare.
-- Setting includes wooden beams.
-- Lighting comes from windows on left and right.
-- Floating particles are visible in the air.
-- Character is looking directly at the camera.
+- Clothing is casual everyday wear (white t-shirt with a blue skirt, or a blue cardigan over a white shirt).
+- Character has no cat ears or other animal features.
+- Setting is the interior of a cozy modern apartment.
+- Photos are usually selfies taken at home.
+- Character is looking directly at the camera with a soft smile.
 - ${CHARACTER_NAME} is 5.4 ft tall and 53 kg of weight.
 - ${CHARACTER_NAME} is slim and thin.
-- ${CHARACTER_NAME}'s buttocks are almost flat.
 
 # Prompt for stable diffusion
 
 ```
-Anime girl cat ears shoulder-length dark_blue hair messy strands blue eyes  small nose cute fangs. Shoulders and chest are bare. Floating particles in the air. home. selfie
-(age_30:1.2)
+Anime girl, long straight blonde hair, bright blue eyes, thin round glasses, white t-shirt, long blue skirt, gentle smile. Cozy apartment interior, bedroom, window with soft daylight, plants, warm indoor lighting, bokeh. selfie
+(age_20:1.2)
 medium breasts
 <lora:perfecteyes:1>
 <lora:Iridescence:1>
