@@ -213,9 +213,10 @@ static const std::unordered_map<AStringView, AStringView> CONFIG_COMMENTS = {
     },
     {
       "capabilities.take_photo.openai_images",
-      "OpenAI-compatible image generation endpoint and model.\n"
+      "OpenRouter-style image generation endpoint (POST {baseUrl}images) and model.\n"
       "Only used when backend = \"openai\".\n"
-      "- RouterAI (RU-friendly): endpoint.baseUrl = \"https://routerai.ru/api/v1/\", model = \"flux\"\n"
+      "- RouterAI (RU-friendly): endpoint.baseUrl = \"https://routerai.ru/api/v1/\",\n"
+      "  model = \"black-forest-labs/flux.2-klein-4b\" (cheap) or \"black-forest-labs/flux.2-flex\".\n"
       "- specify endpoint.bearerKey with your API key.",
     },
     {

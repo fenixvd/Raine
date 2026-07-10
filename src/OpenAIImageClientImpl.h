@@ -6,9 +6,9 @@
  *        generation endpoint (v1/images/generations), e.g. FLUX via RouterAI.
  *
  * Unlike StableDiffusionClientImpl (Automatic1111 WebUI), this backend has no notion of
- * samplers, schedulers, checkpoints, LoRA or negative prompts. A1111-specific request
- * fields are therefore ignored; the negative prompt (if any) is folded into the text
- * prompt, and width/height are snapped to the closest size the endpoint accepts.
+ * samplers, schedulers, checkpoints, LoRA, size or negative prompts. A1111-specific request
+ * fields are therefore ignored; the negative prompt (if any) is folded into the text prompt.
+ * Talks to POST {baseUrl}images with {model, prompt, n} and reads data[].b64_json.
  */
 struct OpenAIImageClientImpl : IStableDiffusionClient {
     EndpointAndModel endpoint = config().imageOpenAI;
