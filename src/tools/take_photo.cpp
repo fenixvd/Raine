@@ -5,31 +5,32 @@
 #include "take_photo.h"
 
 #include "ImageGenerator.h"
-#include "StableDiffusionClientImpl.h"
 #include "llmui/image.h"
 
 OpenAITools::Tool tools::takePhoto(_<IStableDiffusionClient> stableDiffusion, _<IOpenAIChat> openAI) {
+    const auto& name = config().characterName;
     return {
         .name = "take_photo",
-        .description = "Takes a photo by Kuni. This tool is useful for creating selfies, photos of "
+        .description = "Takes a photo by {}. This tool is useful for creating selfies, photos of "
                          "surroundings, or any other images. "
                          "The result of this tool is a photo description and a filename. "
-                         "The filename can then be sent to someone else using #send_telegram_message.",
+                         "The filename can then be sent to someone else using #send_telegram_message."_format(name),
         .parameters =
             {
                 .properties =
                     {
                         {"photo_desc", {
                             .type = "string",
-                            .description = "Describes the image Kuni would like to achieve. Refer to yourself "
-                                            "as Kuni. Avoid unnecessary details. Instead of specifying complex "
+                            .description = "Describes the image {} would like to achieve. Refer to yourself "
+                                            "as {}. Avoid unnecessary details. Instead of specifying complex "
                                             "composition, prefer setting vibe of the image. "
-                                            "Example: \"Kuni makes playful selfie\""
-                                            "take_photo only knows about Kuni.\n"
+                                            "Example: \"{} makes playful selfie\""
+                                            "take_photo only knows about {}.\n"
                                             "To draw other character, specify their name, and describe their\n"
                                             "appearance as specifically as possible."
-                                            "Example: \"Selfie of Kuni - Kuni's sister: anime young female,"
-                                            "gold eyes, white hair, white dress, black socks.\"\n"
+                                            "Example: \"Selfie of {} - {}'s sister: anime young female,"
+                                            "gold eyes, white hair, white dress, black socks.\"\n"_format(
+                                                name, name, name, name, name, name)
                             ,}},
                     },
                 .required = {"photo_desc"},
@@ -37,7 +38,7 @@ OpenAITools::Tool tools::takePhoto(_<IStableDiffusionClient> stableDiffusion, _<
         .handler = [stableDiffusion = std::move(stableDiffusion),
                     openAI = std::move(openAI)](OpenAITools::Ctx ctx) -> AFuture<AString> {
             auto photoDesc = ctx.args["photo_desc"].asStringOpt().valueOrException("photo_desc is required");
-            auto galleryImage = co_await ImageGenerator{_new<StableDiffusionClientImpl>(), openAI, IOpenAIChat::Params{.config = config().llmImageToText}}.generate(photoDesc);
+            auto galleryImage = co_await ImageGenerator{stableDiffusion, openAI, IOpenAIChat::Params{.config = config().llmImageToText}}.generate(photoDesc);
             auto description = co_await llmui::image({}, *openAI, galleryImage.path);
 
             co_return "{}\n\nFilename: {}\n"
