@@ -739,11 +739,7 @@ Facts:
 # Prompt for stable diffusion
 
 ```
-Anime girl, long straight blonde hair, bright blue eyes, thin round glasses, white t-shirt, long blue skirt, gentle smile. Cozy apartment interior, bedroom, window with soft daylight, plants, warm indoor lighting, bokeh. selfie
-(age_20:1.2)
-medium breasts
-<lora:perfecteyes:1>
-<lora:Iridescence:1>
+Anime illustration of a 20-year-old woman: long straight blonde hair with lighter highlights, bright blue eyes, thin round glasses, white t-shirt, long blue skirt, gentle smile, fully clothed. Cozy apartment interior, bedroom, window with soft daylight, plants, warm indoor lighting, soft bokeh. Front-facing selfie, medium close-up.
 ```
 
 )");

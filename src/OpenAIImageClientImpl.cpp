@@ -11,16 +11,13 @@ static constexpr auto LOG_TAG = "OpenAIImageClient";
 AFuture<IStableDiffusionClient::Txt2ImgResponse> OpenAIImageClientImpl::txt2img(const Txt2ImgRequest& request) {
     ALOG_TRACE(LOG_TAG) << "txt2img";
 
-    // OpenRouter-style image endpoints (e.g. RouterAI) have no negative prompt; fold it into the
-    // text prompt. Sampler/steps/cfg/size/LoRA fields are not part of this API and are ignored.
-    AString prompt = request.prompt;
-    if (!request.negative_prompt.empty()) {
-        prompt += "\n\nAvoid the following: {}."_format(request.negative_prompt);
-    }
-
+    // OpenRouter-style image endpoints (e.g. RouterAI/FLUX) have no negative prompt, and it must NOT be
+    // folded into the text prompt: negatives legitimately contain words like "nudity" and "child", which
+    // trip the provider's content moderation even though they describe what to avoid. Sampler/steps/cfg/
+    // size/LoRA fields are not part of this API either and are ignored.
     AJson body = AJson::Object {
         { "model", endpoint.model },
-        { "prompt", prompt },
+        { "prompt", request.prompt },
         { "n", 1 },
         { "output_format", "png" },
     };
