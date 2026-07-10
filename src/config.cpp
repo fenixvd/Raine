@@ -342,6 +342,12 @@ static const std::unordered_map<AStringView, AStringView> CONFIG_COMMENTS = {
       "Increase this if your LLM backend is slow to respond (e.g. big local models on weak hardware).",
     },
     {
+      "misc.photo_max_trials",
+      "How many times take_photo may generate an image and re-check it with the vision model before\n"
+      "giving up. Each trial costs one image generation plus one vision assessment, so lower values are\n"
+      "considerably cheaper and faster at the price of occasionally settling for no photo at all.",
+    },
+    {
       "misc.video_max_frames",
       "Maximum number of frames sampled from a video/GIF/video-sticker for captioning.\n"
       "Frames are spread evenly across the video duration. Higher values give the LLM more context\n"

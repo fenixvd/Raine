@@ -35,6 +35,7 @@
   X(float, antiRepeatTriggerAvg, 0.85, "misc.anti_repeat_trigger_avg") \
   X(size_t, antiRepeatMaxHistory, 32, "misc.anti_repeat_max_history") \
   X(std::chrono::seconds, requestTimeoutSecs, std::chrono::seconds(30), "misc.request_timeout_secs") \
+  X(size_t, photoMaxTrials, 3, "misc.photo_max_trials") \
   X(size_t, videoMaxFrames, 16, "misc.video_max_frames") \
   X(size_t, videoMinStepMs, 1000, "misc.video_min_step_ms") \
   X(bool, capabilityWebSearch, false, "capabilities.web_search.enabled") \

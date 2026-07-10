@@ -38,7 +38,11 @@ OpenAITools::Tool tools::takePhoto(_<IStableDiffusionClient> stableDiffusion, _<
         .handler = [stableDiffusion = std::move(stableDiffusion),
                     openAI = std::move(openAI)](OpenAITools::Ctx ctx) -> AFuture<AString> {
             auto photoDesc = ctx.args["photo_desc"].asStringOpt().valueOrException("photo_desc is required");
-            auto galleryImage = co_await ImageGenerator{stableDiffusion, openAI, IOpenAIChat::Params{.config = config().llmImageToText}}.generate(photoDesc);
+            auto galleryImage = co_await ImageGenerator{
+                stableDiffusion, openAI,
+                IOpenAIChat::Params{ .config = config().llmImageToText },   // assessment: needs vision
+                IOpenAIChat::Params{ .config = config().llm },              // prompt engineering: text-only
+            }.generate(photoDesc);
             auto description = co_await llmui::image({}, *openAI, galleryImage.path);
 
             co_return "{}\n\nFilename: {}\n"

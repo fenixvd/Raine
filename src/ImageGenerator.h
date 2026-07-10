@@ -12,8 +12,16 @@
  */
 class ImageGenerator {
 public:
-    ImageGenerator(_<IStableDiffusionClient> sdClient, _<IOpenAIChat> openAI, IOpenAIChat::Params chatParams)
-        : mSdClient(std::move(sdClient)), mOpenAI(std::move(openAI)), mChatParams(std::move(chatParams)) {}
+    /**
+     * @param chatParams vision-capable model, used to assess the generated image.
+     * @param promptParams model used to engineer the text prompt. No images are sent here, so a cheap
+     *        text-only model is preferable; defaults to chatParams when not supplied.
+     */
+    ImageGenerator(
+        _<IStableDiffusionClient> sdClient, _<IOpenAIChat> openAI, IOpenAIChat::Params chatParams,
+        AOptional<IOpenAIChat::Params> promptParams = std::nullopt)
+        : mSdClient(std::move(sdClient)), mOpenAI(std::move(openAI)), mChatParams(std::move(chatParams)),
+          mPromptParams(promptParams.valueOr(mChatParams)) {}
 
     struct GalleryImage {
         _<AImage> image;
@@ -32,6 +40,7 @@ private:
     _<IStableDiffusionClient> mSdClient;
     _<IOpenAIChat> mOpenAI;
     IOpenAIChat::Params mChatParams;
+    IOpenAIChat::Params mPromptParams;
 
     struct PromptPair {
         AString positive;

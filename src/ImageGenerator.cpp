@@ -1,5 +1,7 @@
 #include "ImageGenerator.h"
 
+#include <algorithm>
+#include <cmath>
 #include <random>
 #include <range/v3/algorithm/count_if.hpp>
 
@@ -17,7 +19,6 @@
 #include "AUI/IO/AFileInputStream.h"
 
 static constexpr auto LOG_TAG = "ImageGenerator";
-static constexpr auto TRIAL_COUNT = 10;
 
 /**
  * @brief Minimize risk of generating too young/child characters.
@@ -39,7 +40,11 @@ static AJson parseResponse(AString content) {
 
 AFuture<ImageGenerator::GalleryImage> ImageGenerator::generate(AString description) {
     ALOG_TRACE(LOG_TAG) << "generate: " << description;
-    int trialIndex = 0;
+    const auto trialCount = std::max<size_t>(1, config().photoMaxTrials);
+    // Every few failed trials the prompt is re-engineered from scratch instead of nudged by feedback.
+    // Clamped to >= 2 so that low trial counts don't restart on every single iteration.
+    const auto restartEvery = std::max<size_t>(2, size_t(std::sqrt(trialCount)));
+    size_t trialIndex = 0;
 
     naxyi:
     ALogger::info(LOG_TAG) << "Engineering initial prompt for: " << description;
@@ -52,7 +57,7 @@ AFuture<ImageGenerator::GalleryImage> ImageGenerator::generate(AString descripti
 
     AString descriptionWithAppearance = "<character name=\"{}\" canonical_description>\n{}\n</character canonical_description>\n<user_description overrides_canonical=\"true\">\n{}\n</user_description overrides_canonical=\"true\">"_format(config().characterName, prompts().characterAppearance, description);
 
-    while (trialIndex <= TRIAL_COUNT) {
+    while (trialIndex <= trialCount) {
         try {
             ++trialIndex;
             static std::default_random_engine ge(std::time(nullptr));
@@ -127,7 +132,7 @@ AFuture<ImageGenerator::GalleryImage> ImageGenerator::generate(AString descripti
             //     co_return lastImage;
             // }
 
-            if (trialIndex % size_t(std::sqrt(TRIAL_COUNT)) == 0) {
+            if (trialIndex % restartEvery == 0) {
                 ALogger::info(LOG_TAG) << "Last trial failed. Retrying with different prompt...";
                 goto naxyi;
             }
@@ -157,7 +162,7 @@ AFuture<> ImageGenerator::engineerPrompt(PromptPair& out, const AString& descrip
     for (const auto& word : LOL_WHAT) {
         safeDescription.replaceAll(word, "");
     }
-    auto params = mChatParams;
+    auto params = mPromptParams;
     params.systemPrompt = R"(
 You are an expert Stable Diffusion prompt engineer.
 Your task is to transform a freeform description into a high-quality, descriptive Stable Diffusion prompt.
