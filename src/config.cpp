@@ -189,6 +189,12 @@ static const std::unordered_map<AStringView, AStringView> CONFIG_COMMENTS = {
       "- \"papik_only\" papik_chat_id is the only one who can access her",
     },
     {
+      "general.lockdown_allow_channels",
+      "If true, broadcast channels she is subscribed to bypass the lockdown filter and remain readable\n"
+      "(useful for news), while private chats are still restricted by the lockdown mode above.\n"
+      "Channels can't text her and she can't reply into them, so this does not widen who can talk to her.",
+    },
+    {
       "capabilities.take_photo.enabled",
       "Whether Kuni can generate new photos. Requires `vision` capability.",
     },

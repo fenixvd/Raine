@@ -8,6 +8,21 @@ AFuture<bool> util::isAccessibleFromLockdown(ITelegramClient& telegram, int64_t 
 #ifdef AUI_TESTS_MODULE
     co_return config().papikChatId == chatId;
 #else
+    // Broadcast channels are read-only feeds (news): the character can't be texted by them and can't
+    // reply into them, so allow them through regardless of lockdown when enabled. This lets her stay
+    // locked to a single person while still reading subscribed news channels.
+    if (config().lockdownAllowChannels) {
+        try {
+            auto chat = co_await telegram.sendQueryWithResult(ITelegramClient::toPtr(td::td_api::getChat(chatId)));
+            if (chat && chat->type_ && chat->type_->get_id() == td::td_api::chatTypeSupergroup::ID
+                && static_cast<const td::td_api::chatTypeSupergroup&>(*chat->type_).is_channel_) {
+                co_return true;
+            }
+        } catch (const AException&) {
+            // Couldn't resolve the chat - fall through to the normal lockdown rules below.
+        }
+    }
+
     switch (config().lockdown) {
         case Config::LockdownMode::NONE: {
             co_return true;

@@ -15,6 +15,7 @@
   X(EndpointAndModel, llm, (EndpointAndModel{.endpoint={"https://routerai.ru/api/v1/"},.model="deepseek/deepseek-v4-pro"}), "general.llm") \
   X(EndpointAndModel, embedding, (EndpointAndModel{.endpoint={"https://routerai.ru/api/v1/"},.model="openai/text-embedding-3-large"}), "general.embedding") \
   X(::Config::LockdownMode, lockdown, ::Config::LockdownMode::PAPIK_ONLY, "general.lockdown") \
+  X(bool, lockdownAllowChannels, true, "general.lockdown_allow_channels") \
   X(bool, canWriteToANewPerson, false, "misc.can_write_to_a_new_person") \
   X(bool, wakeUpOnPinnedChat, false, "misc.wake_up_on_pinned_chat") \
   X(bool, randomlyGoSleep, true, "misc.randomly_go_sleep") \
