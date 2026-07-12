@@ -186,7 +186,7 @@ AppBase::AppBase(Init init): mInit(std::move(init)), mDiary({
 
                         // performs scan on diary based on entire context.
                         // this will find common cues which are related to current conversation.
-                        {
+                        if (config().diaryInjectionMaxLength > 0) {
                             auto currentContext = co_await contextEmbedding(*self.openAI(), self.mTemporaryContext | ranges::view::take_last(3));
                             auto relatednesses = co_await self.mDiary.query(currentContext, {.confidenceFactor = 0.f});
 
