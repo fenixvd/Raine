@@ -346,6 +346,9 @@ OpenAITools::Tool tools::sendTelegramMessage(
                 // we will split manually.
 
                 for (auto line : message.split("\n")) {
+                    if (line.replacedAll(" ", "").empty()) {
+                        continue;
+                    }
                     co_await simulateTypingDelay(line.length());
                     // std::exchange: we want all attachments go to the first message.
                     auto sent = co_await util::telegramPostMessage(*telegram,
