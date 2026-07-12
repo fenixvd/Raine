@@ -40,7 +40,7 @@ struct IStableDiffusionClient {
         double hr_scale = 2.0;
         AString hr_upscaler = "Latent";
         int64_t hr_second_pass_steps = 0;
-        double denoising_strength = 0.7;
+        double denoising_strength = 1.0;
     };
 
     struct Txt2ImgResponse {
