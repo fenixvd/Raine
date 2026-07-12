@@ -198,14 +198,18 @@ protected:
 
     AFuture<AString> onCleanContext() override {
         AString result = co_await AppBase::onCleanContext();
-        if (config().capabilityUseStickers) {
-            auto list = co_await llmui::listFavoriteStickers(*telegram(), *openAI());
-            if (!list.empty()) {
-                result += "<your_favorite_stickers>\n";
-                result += list;
-                result += "</your_favorite_stickers>\n";
-            }
-        }
+        // Alex2772 (9 Jul 2026):
+        // consumes too much content.
+        // if llm wants to share a sticker, it would call get_stickers().
+        //
+        // if (config().capabilityUseStickers) {
+        //     auto list = co_await llmui::listFavoriteStickers(*telegram(), *openAI());
+        //     if (!list.empty()) {
+        //         result += "<your_favorite_stickers>\n";
+        //         result += list;
+        //         result += "</your_favorite_stickers>\n";
+        //     }
+        // }
         co_return result;
     }
 
