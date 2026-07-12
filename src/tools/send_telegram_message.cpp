@@ -202,90 +202,92 @@ OpenAITools::Tool tools::sendTelegramMessage(
                 }
             }
 
-            // verify that kuni does not repeat itself.
-            // after introducing this quality of dialogs with LLM was significantly increased:
-            // - LLM does not copypaste its prior responses
-            // - LLM inclined to switch topics or respond nothing "if it has nothing to say", which is more
-            //   natural.
-            //
-            // dirty fix: skip similarity checks if a photo was attached: llm's comment on photo is not much
-            // important
-            if (!message.empty() && photoFilename.empty()) {
-                auto target = co_await openAI->embedding({ .config = config().embedding }, message);
-                static AMap<AString, std::valarray<double>> embeddings;
-                double maxSimilarity = 0.0;
-                double avgSimilarity = 0.0;
+            if (config().antiRepeatTriggerMax < 1.f && config().antiRepeatTriggerAvg < 1.f && config().antiRepeatTriggerMax == 0) {
+                // verify that kuni does not repeat itself.
+                // after introducing this quality of dialogs with LLM was significantly increased:
+                // - LLM does not copypaste its prior responses
+                // - LLM inclined to switch topics or respond nothing "if it has nothing to say", which is more
+                //   natural.
+                //
+                // dirty fix: skip similarity checks if a photo was attached: llm's comment on photo is not much
+                // important
+                if (!message.empty() && photoFilename.empty()) {
+                    auto target = co_await openAI->embedding({ .config = config().embedding }, message);
+                    static AMap<AString, std::valarray<double>> embeddings;
+                    double maxSimilarity = 0.0;
+                    double avgSimilarity = 0.0;
 
-                static double giveAHeadStart = 0.0;
-                size_t countOfKunisMessages = 0;
-                for (auto& i : *messages) {
-                    if (i->sender_id_->get_id() != td::td_api::messageSenderUser::ID) {
-                        continue;
+                    static double giveAHeadStart = 0.0;
+                    size_t countOfKunisMessages = 0;
+                    for (auto& i : *messages) {
+                        if (i->sender_id_->get_id() != td::td_api::messageSenderUser::ID) {
+                            continue;
+                        }
+                        if (static_cast<const td::td_api::messageSenderUser&>(*i->sender_id_).user_id_ != telegram->myId()) {
+                            continue;
+                        }
+                        ++countOfKunisMessages;
+                        auto text = llmui::extractMessageTypeAndText(*i);
+                        auto& embedding = embeddings[text];
+                        if (embedding.size() != target.size()) {
+                            embedding = co_await openAI->embedding({ .config = config().embedding }, text);
+                        }
+                        const auto similiarity = util::cosine_similarity(target, embedding);
+                        avgSimilarity += similiarity;
+                        maxSimilarity = std::max(maxSimilarity, similiarity);
+                        if (similiarity > config().antiRepeatTriggerMax + giveAHeadStart) {
+                            giveAHeadStart += 0.07; // relax repeating after itself check
+                            ALogger::warn(LOG_TAG) << "LLM is repeating itself: (maxSimilarity=" << maxSimilarity << ")" << message;
+                            // If LLM generates a follow-up that repeats meaning of its previous responses,
+                            // this usually means the conversation has reached to its logical end. In such case,
+                            // a human will not do a follow-up whatsoever.
+                            //
+                            // Alex2772 (apr 19 2026):
+                            // Changed "You are repeating yourself. Please rephrase" to
+                            // "You are repeating yourself, which usually means you have "
+                            // "nothing to put in. Suggestion: close the chat
+                            //
+                            // Recently Kuni has adopted this behaviour: if Kuni receives several messages
+                            // about repeating itself, it makes a photo instead. No thanks photo generation
+                            // is too expensive.
+                            //
+                            // I'm trying to make Kuni more lazy by suggesting closing a chat on a low-quality
+                            // follow-up.
+
+                            throw AException(prompts().antiRepeatPrompt);
+                        }
                     }
-                    if (static_cast<const td::td_api::messageSenderUser&>(*i->sender_id_).user_id_ != telegram->myId()) {
-                        continue;
-                    }
-                    ++countOfKunisMessages;
-                    auto text = llmui::extractMessageTypeAndText(*i);
-                    auto& embedding = embeddings[text];
-                    if (embedding.size() != target.size()) {
-                        embedding = co_await openAI->embedding({ .config = config().embedding }, text);
-                    }
-                    const auto similiarity = util::cosine_similarity(target, embedding);
-                    avgSimilarity += similiarity;
-                    maxSimilarity = std::max(maxSimilarity, similiarity);
-                    if (similiarity > config().antiRepeatTriggerMax + giveAHeadStart) {
+                    avgSimilarity /= countOfKunisMessages;
+                    if (avgSimilarity > config().antiRepeatTriggerAvg + giveAHeadStart) {
                         giveAHeadStart += 0.07; // relax repeating after itself check
-                        ALogger::warn(LOG_TAG) << "LLM is repeating itself: (maxSimilarity=" << maxSimilarity << ")" << message;
-                        // If LLM generates a follow-up that repeats meaning of its previous responses,
-                        // this usually means the conversation has reached to its logical end. In such case,
-                        // a human will not do a follow-up whatsoever.
+                        // LLM figured out threshold of REPEAT_YOURSELF_TRIGGER_MAX and indeed it generates
+                        // slightly more variative responses, but their general direction and structure feels
+                        // the same, stalling the dialogue.
                         //
-                        // Alex2772 (apr 19 2026):
-                        // Changed "You are repeating yourself. Please rephrase" to
-                        // "You are repeating yourself, which usually means you have "
-                        // "nothing to put in. Suggestion: close the chat
+                        // Kuni: звезды не спешат, даже если путь неясен... я здесь, чтобы просто быть твоим
+                        //       ориентиром, даже если это только на мгновение... 🌟
+                        // Kuni: горы стоят твердо, даже если путь неясен... я здесь, чтобы просто быть твоим
+                        //       ориентиром, даже если это только на мгновение... 🏔️
                         //
-                        // Recently Kuni has adopted this behaviour: if Kuni receives several messages
-                        // about repeating itself, it makes a photo instead. No thanks photo generation
-                        // is too expensive.
+                        // maxSimilarity=0.73 (threshold 0.75)
+                        // avgSimilarity=0.61
                         //
-                        // I'm trying to make Kuni more lazy by suggesting closing a chat on a low-quality
-                        // follow-up.
+                        // to force LLM from hyperfixating on one thing, let's motivate it to stay silent or
+                        // switch topic
 
+                        ALogger::warn(LOG_TAG) << "LLM is repeating itself: (avgSimilarity=" << avgSimilarity << ")" << message;
                         throw AException(prompts().antiRepeatPrompt);
                     }
-                }
-                avgSimilarity /= countOfKunisMessages;
-                if (avgSimilarity > config().antiRepeatTriggerAvg + giveAHeadStart) {
-                    giveAHeadStart += 0.07; // relax repeating after itself check
-                    // LLM figured out threshold of REPEAT_YOURSELF_TRIGGER_MAX and indeed it generates
-                    // slightly more variative responses, but their general direction and structure feels
-                    // the same, stalling the dialogue.
-                    //
-                    // Kuni: звезды не спешат, даже если путь неясен... я здесь, чтобы просто быть твоим
-                    //       ориентиром, даже если это только на мгновение... 🌟
-                    // Kuni: горы стоят твердо, даже если путь неясен... я здесь, чтобы просто быть твоим
-                    //       ориентиром, даже если это только на мгновение... 🏔️
-                    //
-                    // maxSimilarity=0.73 (threshold 0.75)
-                    // avgSimilarity=0.61
-                    //
-                    // to force LLM from hyperfixating on one thing, let's motivate it to stay silent or
-                    // switch topic
 
-                    ALogger::warn(LOG_TAG) << "LLM is repeating itself: (avgSimilarity=" << avgSimilarity << ")" << message;
-                    throw AException(prompts().antiRepeatPrompt);
-                }
+                    giveAHeadStart = 0.0; // reset indulgence
 
-                giveAHeadStart = 0.0; // reset indulgence
-
-                if (embeddings.size() >= config().antiRepeatMaxHistory) {
-                    ALOG_DEBUG(LOG_TAG) << "Dropped \"anti repeat yourself\" history";
-                    embeddings.clear();
+                    if (embeddings.size() >= config().antiRepeatMaxHistory) {
+                        ALOG_DEBUG(LOG_TAG) << "Dropped \"anti repeat yourself\" history";
+                        embeddings.clear();
+                    }
+                    ALOG_DEBUG(LOG_TAG) << "\"repeat yourself\" maxSimilarity=" << maxSimilarity << " avgSimilarity=" << avgSimilarity;
+                    embeddings.emplace(message, std::move(target));
                 }
-                ALOG_DEBUG(LOG_TAG) << "\"repeat yourself\" maxSimilarity=" << maxSimilarity << " avgSimilarity=" << avgSimilarity;
-                embeddings.emplace(message, std::move(target));
             }
 
 
