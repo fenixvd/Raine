@@ -332,6 +332,9 @@ OpenAITools::Tool tools::sendTelegramMessage(
             };
             message = trySimulateTypos(std::move(message));
 
+            // LLM uses "—" (long dash) instead of "-". fix it.
+            message = message.replacedAll("—", "-");
+
             AString result;
             // actually send a message. we don't really need to wait until tdlib reports message sent
             // successfully (this is exactly when in telegram desktop the message status changes from clock
