@@ -402,7 +402,17 @@ static const std::unordered_map<AStringView, AStringView> CONFIG_COMMENTS = {
       "chat_notification_filter = contacts_only to limit notifications to contacts only, but LLM is still\n"
       "able to freely open any chat.\n"
       "This was implemented as a countermeasure to spamming Kuni's DM.",
-    }
+    },
+    {
+      "misc.can_join_chats",
+      "Whether Kuni chat join a telegram group chat/channel by an invite link (if LLM decides to do so).\n"
+      "Recommendation: in telegram privacy settings, prohibit other users to invite Kuni to their chats.\n"
+      "Let Kuni herself decide to join.\n",
+    },
+    {
+      "misc.can_leave_chats",
+      "Whether Kuni chat leave a telegram group chat/channel.",
+    },
 };
 
 static constexpr auto CONFIG_TOML = "config.toml";

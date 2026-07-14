@@ -38,6 +38,8 @@
 #include "tools/react_with_emoji.h"
 #include "tools/search_chats.h"
 #include "tools/remove_and_ban_chat.h"
+#include "tools/leave_chat.h"
+#include "tools/join_chat.h"
 #include "tools/stickers.h"
 #include "tools/send_telegram_message.h"
 #include "tools/edit_message_text.h"
@@ -186,6 +188,37 @@ protected:
                     co_return co_await llmuiOpenTelegramChat(ctx.tools, chatId);
                 },
             });
+        if (config().canJoinChats) {
+            actions.insert({
+                    .name = "join_chat_by_link",
+                    .description = "Joins a chat/channel by its invite link (e.g. "
+                                   "https://t.me/joinchat/xxxx) and opens it immediately, just like tapping the "
+                                   "invite link in the official Telegram client.",
+                    .parameters =
+                        {
+                            .properties =
+                                {
+                                    {"invite_link", {.type = "string", .description = "The invite link, e.g. https://t.me/joinchat/xxxx"}},
+                                },
+                            .required = {"invite_link"},
+                        },
+                    .handler = [this](OpenAITools::Ctx ctx) -> AFuture<AString> {
+                        auto inviteLink = ctx.args["invite_link"].asStringOpt().valueOrException("invite_link string is required");
+
+                        int64_t chatId;
+                        try {
+                            auto joinedChat = co_await telegram()->sendQueryWithResult(
+                                ITelegramClient::toPtr(td::td_api::joinChatByInviteLink(inviteLink.toStdString())));
+                            chatId = joinedChat->id_;
+                        } catch (const AException& e) {
+                            ALogger::err(LOG_TAG) << "Failed to join chat by invite link \"" << inviteLink << "\": " << e;
+                            co_return "Error: failed to join chat by invite link: {}"_format(e.getMessage());
+                        }
+
+                        co_return co_await llmuiOpenTelegramChat(ctx.tools, chatId);
+                    },
+                });
+        }
         if (config().capabilityUseStickers) {
             actions.insert(tools::stickers::list(telegram(), openAI()));
             actions.insert(tools::stickers::save(telegram()));
@@ -558,6 +591,44 @@ public:
 
             result = "You switched to the chat \"{}\" in Telegram. You see last messages:\n"_format(chat->title_) + result;
 
+            // Mirror the official Telegram client behavior: if you open a group chat/channel you haven't joined,
+            // you only see a "Join" button (plus the ability to react to messages) instead of a text field.
+            if (chat->type_->get_id() == td::td_api::chatTypeBasicGroup::ID ||
+                chat->type_->get_id() == td::td_api::chatTypeSupergroup::ID) {
+                bool isMember = true;
+                try {
+                    auto member = co_await mTelegram->sendQueryWithResult(ITelegramClient::toPtr(td::td_api::getChatMember(
+                        chatId, ITelegramClient::toPtr(td::td_api::messageSenderUser(mTelegram->myId())))));
+                    switch (member->status_->get_id()) {
+                        case td::td_api::chatMemberStatusLeft::ID:
+                        case td::td_api::chatMemberStatusBanned::ID:
+                            isMember = false;
+                            break;
+                        default:
+                            break;
+                    }
+                } catch (const AException& e) {
+                    // e.g. USER_NOT_PARTICIPANT - treat as not a member.
+                    isMember = false;
+                }
+
+                if (!isMember) {
+                    result += R"(
+<instructions>
+You are NOT a member of "{}". You can't send messages here; you can only #react_with_emoji to messages, or use
+#join_chat to become a member (after which you'll be able to fully participate the next time you open this chat).
+</instructions>
+)"_format(chat->title_);
+                    tools = OpenAITools {
+                        tools::reactWithEmoji(telegram(), chat),
+                    };
+                    if (config().canJoinChats) {
+                        tools.insert(tools::joinChat(telegram(), chat));
+                    }
+                    co_return result;
+                }
+            }
+
             switch (chat->type_->get_id()) {
                 case td::td_api::chatTypeSecret::ID:
                 case td::td_api::chatTypePrivate::ID:
@@ -624,6 +695,17 @@ Do NOT forward ads, sponsored posts, or low-value content.
 
         if (config().capabilityUseStickers) {
             tools.insert(tools::stickers::send(telegram(), chat));
+        }
+
+        if (config().canLeaveChats) {
+            switch (chat->type_->get_id()) {
+                case td::td_api::chatTypeBasicGroup::ID:
+                case td::td_api::chatTypeSupergroup::ID:
+                    tools.insert(tools::leaveChat(telegram(), chat));
+                    break;
+                default:
+                    break;
+            }
         }
 
         co_return result;

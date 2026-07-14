@@ -43,6 +43,8 @@
   X(int, typingSimulationMaxWpm, 150, "misc.typing_simulation_max_wpm") \
   X(bool, checkChatsOnStartup, true, "misc.check_chats_on_startup") \
   X(::Config::LockdownMode, chatNotificationFilter, ::Config::LockdownMode::NONE, "misc.chat_notification_filter") \
+  X(bool, canJoinChats, false, "misc.can_join_chats") \
+  X(bool, canLeaveChats, true, "misc.can_leave_chats") \
   X(bool, capabilityWebSearch, false, "capabilities.web_search.enabled") \
   X(AString, webSearchOllamaKey, "", "capabilities.web_search.ollama_bearer_key") \
   X(bool, capabilityVision, false, "capabilities.vision.enabled") \
