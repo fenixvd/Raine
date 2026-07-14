@@ -232,7 +232,7 @@ private:
 
     AFuture<AVector<_<td::td_api::chat>>> getChats() {
         auto chatList = co_await telegram()->sendQueryWithResult(
-            ITelegramClient::toPtr(td::td_api::getChats(ITelegramClient::toPtr(td::td_api::chatListMain()), 50)));
+            ITelegramClient::toPtr(td::td_api::getChats(ITelegramClient::toPtr(td::td_api::chatListMain()), 200)));
         co_return co_await chatIdsToChats(chatList->chat_ids_);
     }
 
@@ -290,6 +290,9 @@ private:
 
         // Check lockdown mode - only allow PAPIK_CHAT_ID if lockdown is enabled
         if (!co_await util::isAccessibleFromLockdown(*telegram(), u->message_->chat_id_)) {
+            co_return;
+        }
+        if (!co_await util::isAccessibleFromLockdown(*telegram(), u->message_->chat_id_, config().chatNotificationFilter)) {
             co_return;
         }
 

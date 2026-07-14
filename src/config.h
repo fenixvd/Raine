@@ -34,6 +34,7 @@
   X(float, antiRepeatTriggerMax, 0.95, "misc.anti_repeat_trigger_max") \
   X(float, antiRepeatTriggerAvg, 0.85, "misc.anti_repeat_trigger_avg") \
   X(size_t, antiRepeatMaxHistory, 32, "misc.anti_repeat_max_history") \
+  X(float, suggestIgnoreChance, 0.1f, "misc.suggest_ignore_chance") \
   X(std::chrono::seconds, requestTimeoutSecs, std::chrono::seconds(30), "misc.request_timeout_secs") \
   X(size_t, videoMaxFrames, 16, "misc.video_max_frames") \
   X(size_t, videoMinStepMs, 1000, "misc.video_min_step_ms") \
@@ -41,6 +42,7 @@
   X(int, typingSimulationMinWpm, 120, "misc.typing_simulation_min_wpm") \
   X(int, typingSimulationMaxWpm, 150, "misc.typing_simulation_max_wpm") \
   X(bool, checkChatsOnStartup, true, "misc.check_chats_on_startup") \
+  X(::Config::LockdownMode, chatNotificationFilter, ::Config::LockdownMode::NONE, "misc.chat_notification_filter") \
   X(bool, capabilityWebSearch, false, "capabilities.web_search.enabled") \
   X(AString, webSearchOllamaKey, "", "capabilities.web_search.ollama_bearer_key") \
   X(bool, capabilityVision, false, "capabilities.vision.enabled") \

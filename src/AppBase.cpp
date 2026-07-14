@@ -57,6 +57,70 @@ AFuture<std::valarray<double>> contextEmbedding(IOpenAIChat& openAI, ranges::ran
     co_return co_await openAI.embedding({ .config = config().embedding }, basePrompt);
 }
 
+[[nodiscard]]
+static AFuture<> processRandomlyGoSleep(bool& wakeUp) {
+    if (config().randomlyGoSleep) {
+        if (std::uniform_real_distribution(0.0, 1.0)(re) < 0.01) {
+            // 1. randomly go afk is humane
+            // 2. reduce resource usage:
+            //    - less conversations would be made
+            //    - in case of group chats and telegram channels, messages would be processed in batches
+            const auto duration = std::chrono::minutes(std::uniform_int_distribution(15, 120)(re));
+            ALogger::info(LOG_TAG) << "Going to sleep for " << std::chrono::duration_cast<std::chrono::minutes>(duration).count() << " minutes";
+            wakeUp = false;
+            for (int i = 0; i < std::chrono::duration_cast<std::chrono::seconds>(duration).count(); ++i) {
+                // костыль ну да сойдёт
+                if (wakeUp) {
+                    ALogger::info(LOG_TAG) << "Early wake up";
+                    break;
+                }
+                co_await AThread::asyncSleep(1s);
+            }
+        }
+    }
+}
+
+[[nodiscard]]
+static AFuture<> processShortcutOpen(AppBase::Notification& notification) {
+    if (notification.actions.handlers().size() == 1) {
+        const auto& action = notification.actions.handlers().begin()->second;
+        if (action.name == "open" && action.parameters.properties.size() == 0) {
+            // shortcut/optimization: if the notification gives the only option to open it, there's no
+            // need to ask LLM whether it wants to open the notification because it does it
+            // in 100% cases.
+            // Also, this greatly fits in the current architecture, because we can't change notification
+            // text at runtime, BUT we can provide more recent data by giving the notification code
+            // control by calling "open()".
+            notification.message = co_await action.handler({
+                .tools = notification.actions,
+                .args = AJson {},
+                .allToolCalls = {},
+            });
+        }
+    }
+}
+
+[[nodiscard]]
+static bool processIgnoreChance(IOpenAIChat::Session& temporaryContext, bool& canIgnore, const IOpenAIChat::Message& lastLLMResponse) {
+    if (std::uniform_real_distribution(0.f, 1.f)(re) < config().suggestIgnoreChance) { // attempt to make LLM lazy and ignore message :)
+        // if (std::exchange(canIgnore, false))
+        { // avoid subsequent knockbacks
+            for (const auto& tc : lastLLMResponse.tool_calls) {
+                if (tc.function.name == "wait" || tc.function.name == "pause") {
+                    return false;
+                }
+                temporaryContext << IOpenAIChat::Message{
+                    .role = IOpenAIChat::Message::Role::TOOL,
+                    .content = "Error: do you really want to continue? Think again; repeat `{}` to continue or call wait() to finish."_format(AStringView(tc.function.name)),
+                    .tool_call_id = tc.id,
+                };
+            }
+            ALogger::info(LOG_TAG) << "Begging LLM to be lazy (ignore message)";
+            return true;
+        }
+    }
+    return false;
+}
 
 AppBase::~AppBase() {
     if (mAliveToken) {
@@ -109,25 +173,7 @@ AppBase::AppBase(Init init): mInit(std::move(init)), mDiary({
                     self.mSystemPromptSuffix = co_await self.onCleanContext();
                 }
     #ifndef AUI_TESTS_MODULE
-                if (config().randomlyGoSleep) {
-                    if (std::uniform_real_distribution(0.0, 1.0)(re) < 0.01) {
-                        // 1. randomly go afk is humane
-                        // 2. reduce resource usage:
-                        //    - less conversations would be made
-                        //    - in case of group chats and telegram channels, messages would be processed in batches
-                        const auto duration = std::chrono::minutes(std::uniform_int_distribution(15, 120)(re));
-                        ALogger::info(LOG_TAG) << "Going to sleep for " << std::chrono::duration_cast<std::chrono::minutes>(duration).count() << " minutes";
-                        self.mWakeup = false;
-                        for (int i = 0; i < std::chrono::duration_cast<std::chrono::seconds>(duration).count(); ++i) {
-                            // костыль ну да сойдёт
-                            if (self.mWakeup) {
-                                ALogger::info(LOG_TAG) << "Early wake up";
-                                break;
-                            }
-                            co_await AThread::asyncSleep(1s);
-                        }
-                    }
-                }
+                co_await processRandomlyGoSleep(self.mWakeup);
     #endif
                 AUI_ASSERT(AThread::current() == self.getThread());
                 if (self.mNotifications.empty()) {
@@ -145,22 +191,9 @@ AppBase::AppBase(Init init): mInit(std::move(init)), mDiary({
                 notification.onStartedProcessing.supplyValue();
                 AUI_DEFER { notification.onProcessed.supplyValue(); };
                 try {
-                    if (notification.actions.handlers().size() == 1) {
-                        const auto& action = notification.actions.handlers().begin()->second;
-                        if (action.name == "open" && action.parameters.properties.size() == 0) {
-                            // shortcut/optimization: if the notification gives the only option to open it, there's no
-                            // need to ask LLM whether it wants to open the notification because it does it
-                            // in 100% cases.
-                            // Also, this greatly fits in the current architecture, because we can't change notification
-                            // text at runtime, BUT we can provide more recent data by giving the notification code
-                            // control by calling "open()".
-                            notification.message = co_await action.handler({
-                                .tools = notification.actions,
-                                .args = AJson {},
-                                .allToolCalls = {},
-                            });
-                        }
-                    }
+                    bool canIgnore = true;
+                    co_await processShortcutOpen(notification);
+
                     ALOG_DEBUG(LOG_TAG) << "Processing notification: " << notification.message;
 
                     self.mTemporaryContext << IOpenAIChat::Message{
@@ -303,6 +336,11 @@ AppBase::AppBase(Init init): mInit(std::move(init)), mDiary({
                         };
                         goto naxyi_preserve_ctx;
                     }
+
+                    if (processIgnoreChance(self.mTemporaryContext, canIgnore, botAnswer.choices.at(0).message)) {
+                        goto naxyi_preserve_ctx;
+                    }
+
                     {
                         auto toolCalls = co_await notification.actions.handleToolCalls(botAnswer.choices.at(0).message.tool_calls, self.metricBreadcumbs());
                         if (ranges::any_of(toolCalls, [](const IOpenAIChat::Message& msg) { return msg.content.contains(IOpenAIChat::EMBEDDING_TAG); })) {
@@ -474,7 +512,14 @@ send_telegram_message("text":"мррр~")
 
 void AppBase::updateTools(OpenAITools& actions) {
     ALOG_TRACE(LOG_TAG) << "updateTools";
-    actions.insert(tools::ask([this] { return mTemporaryContext.empty() ? AString{} : mTemporaryContext.last().content; }, openAI(), mDiary));
+    actions.insert(tools::ask([this] {
+        AString out;
+        for (const auto& msg : mTemporaryContext | ranges::view::take_last(2)) {
+            out += msg.content;
+            out += "\n";
+        }
+        return out;
+    }, openAI(), mDiary));
     actions.onAfterToolCall = [this](const AString& toolName) {
         if (toolName == "wait") {
             return;

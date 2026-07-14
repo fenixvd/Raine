@@ -16,6 +16,9 @@ struct Prompts {
     AString sleepConsolidator;
     AString recordAudioSpeech;
     AString messagesEpilogue;
+    AString imageEngineerSystem;
+    AString imageEngineerInstructions;
+    AString imageAssessSystem;
 };
 
 const Prompts& prompts();

@@ -387,8 +387,22 @@ static const std::unordered_map<AStringView, AStringView> CONFIG_COMMENTS = {
       "misc.check_chats_on_startup",
       "If set to true, Kuni will put all unread chats to queue on program startup.\n"
       "If set to false, Kuni will check chats if notification was received during program runtime.\n"
-      "LLM is still able to call get_telegram_chats and iterate through them \"manually\"",
+      "LLM is still able to call get_telegram_chats and iterate through them \"manually\"\n"
+      "This was implemented as a countermeasure to spamming Kuni's DM.",
     },
+    {
+      "misc.suggest_ignore_chance",
+      "A value between 0.0 and 1.0 specifying chance of reading and avoiding action.\n"
+      "Greater values will make Kuni tend to read and ignore messages."
+      "This was implemented as a countermeasure to spamming Kuni's DM.",
+    },
+    {
+      "misc.chat_notification_filter",
+      "In contrast to lockdown mode, controls notifications specifically. You can set lockdown = none and \n"
+      "chat_notification_filter = contacts_only to limit notifications to contacts only, but LLM is still\n"
+      "able to freely open any chat.\n"
+      "This was implemented as a countermeasure to spamming Kuni's DM.",
+    }
 };
 
 static constexpr auto CONFIG_TOML = "config.toml";
@@ -553,20 +567,30 @@ static Config load(bool saveBack = false) {
     if (out.telegramEnabled) {
         {
             const auto& value = toml["general"]["telegram_api_id"];
-        if (value.as_integer() == 0) {
-            ALogger::err(LOG_TAG) << toml::format_error(
-                (toml::make_error_info("general.telegram_api_id should be populated", value, "the actual value is 0")));
-            std::exit(-1);
+            if (value.as_integer() == 0) {
+                ALogger::err(LOG_TAG) << toml::format_error((toml::make_error_info(
+                    "general.telegram_api_id should be populated", value, "the actual value is 0")));
+                std::exit(-1);
+            }
         }
-    }
-    {
-        const auto& value = toml["general"]["telegram_api_hash"];
-        if (value.as_string().empty()) {
-            ALogger::err(LOG_TAG) << toml::format_error((toml::make_error_info(
-                "general.telegram_api_hash should be populated", value, "the actual string is empty")));
-            std::exit(-1);
+        {
+            const auto& value = toml["general"]["telegram_api_hash"];
+            if (value.as_string().empty()) {
+                ALogger::err(LOG_TAG) << toml::format_error((toml::make_error_info(
+                    "general.telegram_api_hash should be populated", value, "the actual string is empty")));
+                std::exit(-1);
+            }
         }
-    }
+        {
+            const auto& value = toml["misc"]["suggest_ignore_chance"];
+            if (value.as_floating() < 0 || value.as_floating() > 0.98f) {
+                ALogger::err(LOG_TAG) << toml::format_error((toml::make_error_info(
+                    "misc.suggest_ignore_chance should be between 0.0 and 1.0",
+                    value,
+                    "the actual value is out of valid range")));
+                std::exit(-1);
+            }
+        }
     }
 #endif
     ALogger::info(LOG_TAG) << CONFIG_TOML << " loaded";
