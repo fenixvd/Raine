@@ -1,4 +1,5 @@
 #include "ImageGenerator.h"
+#include <fmt/base.h>
 
 #include <random>
 #include <range/v3/algorithm/count_if.hpp>
@@ -52,12 +53,13 @@ AFuture<ImageGenerator::GalleryImage> ImageGenerator::generate(AString descripti
 
     AString descriptionWithAppearance = "<character name=\"{}\" canonical_description>\n{}\n</character canonical_description>\n<user_description overrides_canonical=\"true\">\n{}\n</user_description overrides_canonical=\"true\">"_format(config().characterName, prompts().characterAppearance, description);
 
+    ALogger::info(LOG_TAG) << "positive=" << currentPrompt.positive << "\n\nnegative=" << currentPrompt.negative;
     while (trialIndex <= TRIAL_COUNT) {
         try {
             ++trialIndex;
             static std::default_random_engine ge(std::time(nullptr));
             {
-                ALogger::info(LOG_TAG) << "Iteration " << trialIndex << " with prompt:\npositive=" << currentPrompt.positive << "\n\nnegative=" << currentPrompt.negative;
+                ALogger::info(LOG_TAG) << "Iteration " << trialIndex;
 
                 IStableDiffusionClient::Txt2ImgResponse response;
                 try
@@ -107,7 +109,7 @@ AFuture<ImageGenerator::GalleryImage> ImageGenerator::generate(AString descripti
                 }
 
                 ALogger::info(LOG_TAG) << "Not satisfied. Feedback: " << assessment.feedback;
-                co_await engineerPrompt(currentPrompt, description, prompts().characterAppearance, assessment.feedback);
+                // co_await engineerPrompt(currentPrompt, description, prompts().characterAppearance, assessment.feedback);
             }
 
 
@@ -158,40 +160,7 @@ AFuture<> ImageGenerator::engineerPrompt(PromptPair& out, const AString& descrip
         safeDescription.replaceAll(word, "");
     }
     auto params = mChatParams;
-    params.systemPrompt = R"(
-You are an expert Stable Diffusion prompt engineer.
-Your task is to transform a freeform description into a high-quality, descriptive Stable Diffusion prompt.
-You must also integrate the provided character appearance details.
-
-Guidelines:
-- Use descriptive keywords, artist names, and technical terms (e.g., "hyperrealistic", "8k", "masterpiece").
-- Ensure the character's appearance matches the provided appearance prompt. Appearance prompt includes both freeform
-  description and stable-diffusion-optimized prompt. Base your prompt on the character's stable-diffusion prompt,
-  preserving original aesthetics of the character, avoid altering original character design.
-- Who made the image and how? Almost always it would be selfie, unless description explicitly specifies a photographer.
-- If previous prompt iteration were provided, adjust them according to feedback and make sure it still satisfies
-  original character design and desired photo description.
-
-# Characters
-
-<character name="{}">
-{}
-</character name="{}">
-
-# Desired photo description
-
-```
-{}
-```
-
-# Output formatting
-
-Respond in JSON object format with the following fields:
-
-- "positivePrompt": string, positive prompt
-- "negativePrompt": string, negative prompt
-
-)"_format(config().characterName, appearancePrompt, config().characterName, safeDescription);
+    params.systemPrompt = prompts().imageEngineerSystem.format(fmt::arg("CHARACTER_NAME", config().characterName), fmt::arg("CHARACTER_APPEARANCE_PROMPT", appearancePrompt), fmt::arg("SANITIZED_PHOTO_DESCRIPTION", safeDescription));
 
     auto messages = [&] {
         AString message;
@@ -209,24 +178,8 @@ Respond in JSON object format with the following fields:
             message += feedback;
         }
 
-        message += R"(
-
-<instructions>
-When improving the prompt:
-- Prefer Stable Diffusion weighting syntax like (term:1.2) or (phrase:1.5).
-- Do not make the prompt longer just to improve emphasis.
-- If the prompt is too long, shorten it by removing filler words.
-- Only add new words if the image is missing a critical concept.
-- Keep the final prompt short, structured, and friendly for Stable Diffusion.
-- Do not alter original character design
-- "positivePrompt": string, a slightly modified version of the current positive prompt to fix the issues.
-- "negativePrompt": string, a slightly modified version of the current negative prompt to fix the issues.
-
-Positive prompt is what to include to the image.
-
-Negative prompt is what to avoid in the image.
-</instructions>
-    )";
+        message += "\n\n";
+        message += prompts().imageEngineerInstructions;
 
         message += "\nGenerate SD prompt:";
         return IOpenAIChat::Session{
@@ -283,46 +236,7 @@ AFuture<ImageGenerator::AssessmentResult> ImageGenerator::assessImage(const AIma
     ALOG_TRACE(LOG_TAG) << "assessImage description=" << description;
     auto params = mChatParams;
     // Note: mChatParams.config should ideally be a vision-capable model.
-    params.systemPrompt = R"(
-You are an extremely strict image critic and Stable Diffusion quality gate.
-
-You will be shown an image generated from a user description and a character appearance prompt.
-Your job is to decide whether the image is an almost perfect match.
-Be exceptionally picky: if there is any noticeable flaw, ambiguity, inconsistency, or implausible composition, reject it.
-
-Reject the image if ANY of the following are true:
-- Any body part is malformed, missing, duplicated, fused, unnaturally small/large, or placed incorrectly.
-- Hands, fingers, arms, legs, feet, eyes, face, teeth, hair, or clothing look even slightly wrong, distorted, or inconsistent.
-- The character identity or appearance does not closely match the provided description.
-- The pose, physics, or composition is unreasonable or unnatural.
-- The character appears to be floating, flying, suspended, falling incorrectly, or otherwise violating expected
-  gravity/scene logic unless explicitly requested.
-- The scene contains awkward anatomy, weird perspective, broken proportions, or AI-like artifacts.
-- The image has any visible quality issue: blur, low detail, weird textures, melting, extra limbs, duplicate objects,
-  warped edges, bad lighting, or inconsistent shadows.
-- The image only partially satisfies the description.
-- You are uncertain whether the image is correct.
-- Canonical character design was not preserved.
-- Canonical character description includes all known facts about the character; including those that are not directly
-  related to the composition requested by the user.
-- If the user's description overrides a canonical detail, the image must follow the description, not the canonical
-  detail. Canonical design is the fallback only when the description does not specify an alternative.
-- "explicit nudity", unless asked.
-
-Important rule:
-- If there is any reasonable doubt, set "satisfied" to false.
-- Use canonical character design as the default baseline, but let the user's description override any conflicting details.
-- If canonical says one thing and description says another, judge the image against the description.
-- Only set "satisfied" to true if the image is excellent, coherent, anatomically correct, compositionally plausible, and
-  closely matches the description.
-
-Output your assessment in JSON format with the following fields:
-- "satisfied": boolean, true if the image is high quality and matches the description.
-- "feedback": string, explaining what's wrong if not satisfied.
-
-{}
-)";
-    params.systemPrompt = params.systemPrompt.format(description);
+    params.systemPrompt = prompts().imageAssessSystem + description;
     if constexpr (PREVENT_GENERATING_CHILDREN) {
         params.systemPrompt += "\nThe character(s) must not appear as child";
     }
