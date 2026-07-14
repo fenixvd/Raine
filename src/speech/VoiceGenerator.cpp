@@ -18,7 +18,7 @@ static constexpr auto LOG_TAG = "VoiceGenerator";
  */
 static bool transcodePcmToOpus(const APath& in, const APath& out, int sampleRate) {
     auto cmd = "ffmpeg -y -loglevel error -f s16le -ar {} -ac 1 -i \"{}\" -c:a libopus -b:a 32k \"{}\""_format(
-        sampleRate, in.absolute(), out.absolute());
+        sampleRate, in.absolute(), out.parent().absolute() / out.filename());
     ALOG_TRACE(LOG_TAG) << "ffmpeg: " << cmd;
     int code = std::system(cmd.toStdString().c_str());
     if (code != 0) {
