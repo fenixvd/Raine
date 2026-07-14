@@ -37,6 +37,8 @@
 #include "tools/get_telegram_chats.h"
 #include "tools/react_with_emoji.h"
 #include "tools/search_chats.h"
+#include "tools/search_messages.h"
+#include "tools/view_messages_around.h"
 #include "tools/remove_and_ban_chat.h"
 #include "tools/leave_chat.h"
 #include "tools/join_chat.h"
@@ -156,6 +158,8 @@ protected:
         }
         actions.insert(tools::getTelegramChats(telegram(), openAI(), isActingProactively()));
         actions.insert(tools::searchChats(telegram()));
+        actions.insert(tools::searchMessages(telegram(), openAI(), temporaryContext()));
+        actions.insert(tools::viewMessagesAround(telegram(), openAI(), temporaryContext()));
         actions.insert(tools::removeAndBanChat(telegram()));
         actions.insert({
                 .name = "open_chat_by_id",
