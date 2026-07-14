@@ -64,6 +64,8 @@
   X(AString, recordVoiceOpenAIKey, "", "capabilities.record_voice.openai.key") \
   X(AString, recordVoiceOpenAIModel, "tts-1", "capabilities.record_voice.openai.model") \
   X(AString, recordVoiceOpenAIVoice, "alloy", "capabilities.record_voice.openai.voice") \
+  X(AString, recordVoiceOpenAIFormat, "mp3", "capabilities.record_voice.openai.response_format") \
+  X(int, recordVoiceOpenAIPcmSampleRate, 24000, "capabilities.record_voice.openai.pcm_sample_rate") \
   X(bool, proxyEnabled, false, "capabilities.proxy.enabled") \
 
 // clang-format on

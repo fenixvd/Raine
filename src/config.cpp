@@ -365,6 +365,16 @@ static const std::unordered_map<AStringView, AStringView> CONFIG_COMMENTS = {
       "OpenAI TTS voice name, e.g. \"alloy\", \"echo\", \"fable\", \"onyx\", \"nova\", \"shimmer\".",
     },
     {
+      "capabilities.record_voice.openai.response_format",
+      "TTS audio format requested from the provider. \"mp3\" for standard OpenAI TTS.\n"
+      "Some OpenAI-compatible providers (e.g. Gemini via OpenRouter/RouterAI) only return raw\n"
+      "PCM; set this to \"pcm\" to transcode it to OGG/Opus (requires ffmpeg).",
+    },
+    {
+      "capabilities.record_voice.openai.pcm_sample_rate",
+      "Sample rate (Hz) of the raw PCM stream when response_format = \"pcm\". Gemini via RouterAI uses 24000.",
+    },
+    {
       "capabilities.proxy.enabled",
       "Whether to enable the built-in OpenAI-compatible proxy server.\n"
       "When enabled, Kuni exposes an API endpoint that forwards requests through her LLM,\n"
