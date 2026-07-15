@@ -146,8 +146,9 @@ endforeach ()
 
 if (KUNI_USE_FFMPEG)
     # FFmpeg for video frame extraction (libavcodec/libavformat/libswscale)
+    # and PCM->OGG/Opus voice transcoding (libswresample).
     find_package(PkgConfig REQUIRED)
-    pkg_check_modules(FFMPEG REQUIRED libavcodec libavformat libavutil libswscale)
+    pkg_check_modules(FFMPEG REQUIRED libavcodec libavformat libavutil libswscale libswresample)
     target_include_directories(${PROJECT_NAME} PRIVATE ${FFMPEG_INCLUDE_DIRS})
     target_link_libraries(${PROJECT_NAME} PUBLIC ${FFMPEG_LINK_LIBRARIES})
     target_include_directories(Tests PRIVATE ${FFMPEG_INCLUDE_DIRS})
