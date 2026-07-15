@@ -202,7 +202,7 @@ OpenAITools::Tool tools::sendTelegramMessage(
                 }
             }
 
-            if (config().antiRepeatTriggerMax < 1.f && config().antiRepeatTriggerAvg < 1.f && config().antiRepeatTriggerMax != 0.f) {
+            if (config().antiRepeatTriggerMax < 1.f && config().antiRepeatTriggerAvg < 1.f && config().antiRepeatMaxHistory > 0) {
                 // verify that kuni does not repeat itself.
                 // after introducing this quality of dialogs with LLM was significantly increased:
                 // - LLM does not copypaste its prior responses
