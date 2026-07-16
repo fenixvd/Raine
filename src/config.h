@@ -49,6 +49,9 @@
   X(Endpoint, sdEndpoint, (Endpoint{.baseUrl="http://localhost:7860/"}),"capabilities.take_photo.sd.endpoint") \
   X(AString, sdCheckpoint, "novaAnimeXL_ilV170.safetensors", "capabilities.take_photo.sd.checkpoint") \
   X(EndpointAndModel, imageOpenAI, (EndpointAndModel{.endpoint={"https://routerai.ru/api/v1/"},.model="black-forest-labs/flux.2-flex"}), "capabilities.take_photo.openai_images") \
+  X(AString, hordeBaseUrl, "https://aihorde.net/api/v2/", "capabilities.take_photo.horde.base_url") \
+  X(AString, hordeApiKey, "0000000000", "capabilities.take_photo.horde.api_key") \
+  X(AString, hordeModels, "WAI-NSFW-illustrious-SDXL,AMPonyXL,AlbedoBase XL (SDXL),Nova Anime XL", "capabilities.take_photo.horde.models") \
   X(bool, capabilityHearing, false, "capabilities.hearing.enabled") \
   X(EndpointAndModel, llmAudioToText, (EndpointAndModel{.endpoint={"http://localhost:9000/v1/"},.model="base"}), "capabilities.hearing.llm_audio_to_text") \
   X(bool, capabilityRecordVoice, true, "capabilities.record_voice.enabled") \
@@ -83,6 +86,7 @@ struct Config {
     enum class ImageBackend {
         A1111,  // Automatic1111 / SD WebUI (sdapi/v1/txt2img)
         OPENAI, // OpenAI-compatible images endpoint (v1/images/generations), e.g. FLUX via RouterAI
+        HORDE,  // AI Horde (aihorde.net) - free, community-powered, uncensored (NSFW-capable)
     };
 
 #define X(cppType, cppName, cppDefaultValue, tomlPath) cppType cppName = cppDefaultValue;

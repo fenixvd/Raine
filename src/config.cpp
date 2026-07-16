@@ -111,6 +111,8 @@ struct toml::from<Config::ImageBackend> {
             return Config::ImageBackend::A1111;
         if (str == "openai" || str == "flux")
             return Config::ImageBackend::OPENAI;
+        if (str == "horde" || str == "aihorde")
+            return Config::ImageBackend::HORDE;
         throw AException("Invalid image backend: {}"_format(toml::format(v)));
     }
 };
@@ -124,6 +126,8 @@ struct toml::into<Config::ImageBackend> {
                 return "a1111";
             case Config::ImageBackend::OPENAI:
                 return "openai";
+            case Config::ImageBackend::HORDE:
+                return "horde";
         }
         throw AException("bad");
     }

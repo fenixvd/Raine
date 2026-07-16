@@ -23,6 +23,7 @@
 #include "telegram/TelegramClientImpl.h"
 #include "StableDiffusionClientImpl.h"
 #include "OpenAIImageClientImpl.h"
+#include "HordeImageClientImpl.h"
 #include "OpenAIChatImpl.h"
 #include "OpenAIChatMeasurable.h"
 #include "Prometheus.h"
@@ -150,9 +151,12 @@ protected:
     void updateTools(OpenAITools& actions) override {
         AppBase::updateTools(actions);
         if (config().capabilityTakePhoto) {
-            _<IStableDiffusionClient> imageClient = config().imageBackend == Config::ImageBackend::OPENAI
-                ? _<IStableDiffusionClient>(_new<OpenAIImageClientImpl>())
-                : _<IStableDiffusionClient>(_new<StableDiffusionClientImpl>());
+            _<IStableDiffusionClient> imageClient =
+                config().imageBackend == Config::ImageBackend::OPENAI
+                    ? _<IStableDiffusionClient>(_new<OpenAIImageClientImpl>())
+                : config().imageBackend == Config::ImageBackend::HORDE
+                    ? _<IStableDiffusionClient>(_new<HordeImageClientImpl>())
+                    : _<IStableDiffusionClient>(_new<StableDiffusionClientImpl>());
             actions.insert(tools::takePhoto(std::move(imageClient), openAI()));
         }
         if (config().capabilityRecordVoice) {

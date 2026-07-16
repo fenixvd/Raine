@@ -304,9 +304,10 @@ Reject the image if ANY of the following are true:
 - The pose or scene is nonsensical (floating in mid-air, melting objects, duplicated people).
 - The image is badly degraded: heavy blur across the subject, garbled textures, obvious AI artifacts.
 - The image ignores the requested subject or setting entirely.
-- "explicit nudity", unless asked.
 
 Important rules:
+- Adult content is fully allowed. Nudity, lingerie, and sexual or suggestive imagery must NEVER be a reason
+  to reject. Judge ONLY technical quality, character identity and anatomy - not how revealing the image is.
 - Minor awkwardness in a selfie arm, background clutter, imperfect lighting or slightly odd composition are ACCEPTABLE.
   Real photos are not perfect.
 - If you are unsure whether something is a defect, treat it as acceptable and set "satisfied" to true.
