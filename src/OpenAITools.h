@@ -7,8 +7,10 @@
 
 struct OpenAITools {
     struct Ctx {
+        ALogger& logger = ALogger::global();
         OpenAITools& tools;
         AJson args;
+        const IOpenAIChat::Session& temporaryContext;
         const AVector<IOpenAIChat::Message::ToolCall>& allToolCalls;
     };
     using Handler = std::function<AFuture<AString>(Ctx ctx)>;
@@ -58,9 +60,9 @@ struct OpenAITools {
      * @brief Optional hook fired after each tool call handler completes successfully.
      * Not called if the handler throws. Set by AppBase::updateTools to emit AppBase::toolCallFired.
      */
-    std::function<void(const AString& toolName)> onAfterToolCall;
+    AVector<std::function<void(const AString& toolName)>> onAfterToolCall;
 
-    AFuture<IOpenAIChat::Session> handleToolCalls(const AVector<IOpenAIChat::Message::ToolCall>& toolCalls, const _<MetricsBreadcumbs>& metricsBreadCumbs = nullptr);
+    AFuture<IOpenAIChat::Session> handleToolCalls(const AVector<IOpenAIChat::Message::ToolCall>& toolCalls, const _<MetricsBreadcumbs>& metricsBreadCumbs = nullptr, const IOpenAIChat::Session& temporaryContext = {}, ALogger& logger = ALogger::global());
 
     AJson asJson() const;
 

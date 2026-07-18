@@ -69,8 +69,8 @@ static AString removeControlCharacters(AString input) {
 }
 
 AFuture<IOpenAIChat::Session> OpenAITools::handleToolCalls(const AVector<IOpenAIChat::Message::ToolCall>& toolCalls,
-    const _<MetricsBreadcumbs>& metricsBreadCumbs) {
-    ALOG_TRACE("OpenAITools") << "handleToolCalls";
+    const _<MetricsBreadcumbs>& metricsBreadCumbs, const IOpenAIChat::Session& temporaryContext, ALogger& logger) {
+    logger.trace("OpenAITools") << "handleToolCalls";
     IOpenAIChat::Session result;
     for (const auto& toolCall : toolCalls) {
         result << IOpenAIChat::Message{
@@ -83,18 +83,20 @@ AFuture<IOpenAIChat::Session> OpenAITools::handleToolCalls(const AVector<IOpenAI
                             point.emplace(metricsBreadCumbs, "function", toolCall.function.name);
                         }
                         auto handlerResult = co_await c->second.handler({
+                            .logger = logger,
                             .tools = *this,
                             .args = AJson::fromString(toolCall.function.arguments),
+                            .temporaryContext = temporaryContext,
                             .allToolCalls = toolCalls,
                         });
-                        if (onAfterToolCall) {
-                            onAfterToolCall(toolCall.function.name);
+                        for (const auto& i : onAfterToolCall) {
+                            i(toolCall.function.name);
                         }
                         co_return std::move(handlerResult);
                     }
                     co_return "tool \"" + toolCall.function.name + "\" is not currently available. Please use another tool instead.";
                 } catch (const AException& e) {
-                    ALogger::err("OpenAITools") << "error while executing \"{}\" tool: "_format(toolCall.function.name) << e;
+                    logger.err("OpenAITools") << "error while executing \"{}\" tool: "_format(toolCall.function.name) << e;
                     co_return "error while executing \"{}\" tool: {}"_format(toolCall.function.name, e.getMessage());
                 }
             }()),

@@ -61,6 +61,9 @@
 #include <range/v3/view/take.hpp>
 #include <proxy_server/proxy_server.h>
 #include "tools/ask.h"
+#include "tools/group_admin_ban_user.h"
+#include "tools/group_admin_remove_message.h"
+#include "tools/group_admin_set_user_tag.h"
 #include "tools/remove_message.h"
 
 #include <Diary.h>
@@ -94,7 +97,6 @@ public:
 
     [[nodiscard]] _<ITelegramClient> telegram() const { return mTelegram; }
 
-protected:
     void onOffline() override {
         mCurrentlyOpenedChat.reset();
         setOnline(false);
@@ -148,8 +150,8 @@ protected:
             mCurrentlyOpenedChat->chat->id_, {}, {}, ITelegramClient::toPtr(td::td_api::chatActionTyping()))));
     }
 
-    void updateTools(OpenAITools& actions) override {
-        AppBase::updateTools(actions);
+    void updateTools(OpenAITools& actions, const IOpenAIChat::Session& temporaryContext) override {
+        AppBase::updateTools(actions, temporaryContext);
         if (config().capabilityTakePhoto) {
             actions.insert(tools::takePhoto(_new<StableDiffusionClientImpl>(), openAI()));
         }
@@ -158,8 +160,8 @@ protected:
         }
         actions.insert(tools::getTelegramChats(telegram(), openAI(), isActingProactively()));
         actions.insert(tools::searchChats(telegram()));
-        actions.insert(tools::searchMessages(telegram(), openAI(), temporaryContext()));
-        actions.insert(tools::viewMessagesAround(telegram(), openAI(), temporaryContext()));
+        actions.insert(tools::searchMessages(telegram(), openAI(), temporaryContext));
+        actions.insert(tools::viewMessagesAround(telegram(), openAI(), temporaryContext));
         actions.insert(tools::removeAndBanChat(telegram()));
         actions.insert({
                 .name = "open_chat_by_id",
@@ -189,7 +191,7 @@ protected:
                         co_return "No such chat";
                     }
 
-                    co_return co_await llmuiOpenTelegramChat(ctx.tools, chatId);
+                    co_return co_await llmuiOpenTelegramChat(ctx.logger, ctx.tools, chatId, ctx.temporaryContext);
                 },
             });
         if (config().canJoinChats) {
@@ -219,7 +221,7 @@ protected:
                             co_return "Error: failed to join chat by invite link: {}"_format(e.getMessage());
                         }
 
-                        co_return co_await llmuiOpenTelegramChat(ctx.tools, chatId);
+                        co_return co_await llmuiOpenTelegramChat(ctx.logger, ctx.tools, chatId, ctx.temporaryContext);
                     },
                 });
         }
@@ -229,8 +231,29 @@ protected:
         }
     }
 
-    AFuture<AString> onCleanContext() override {
-        AString result = co_await AppBase::onCleanContext();
+    AFuture<> sendNotificationsOnInit() {
+        if (!config().checkChatsOnStartup) {
+            co_return;
+        }
+        // tdlib does not send notifications for unread chats on program startup. we'll fix this.
+        auto chats = co_await getChats();
+        chats |= ranges::actions::reverse;   // older first, newest last
+        for (auto& chat : chats) {
+            if (chat->unread_count_ == 0) {
+                continue;
+            }
+            // make up a updateNewMessage event and pass it to handleTelegramEvent. the latter will format a
+            // notification for us.
+            auto notification = _new<td::td_api::updateNewMessage>();
+            notification->message_ = std::move(chat->last_message_);
+            co_await handleTelegramEvent(std::move(notification));
+        }
+    }
+
+
+protected:
+    AString onCleanContext() const override {
+        AString result = AppBase::onCleanContext();
         // Alex2772 (9 Jul 2026):
         // consumes too much content.
         // if llm wants to share a sticker, it would call get_stickers().
@@ -243,12 +266,7 @@ protected:
         //         result += "</your_favorite_stickers>\n";
         //     }
         // }
-        co_return result;
-    }
-
-    AFuture<> onBeforeMainLoop() override {
-        co_await telegram()->waitForConnection();
-        co_await sendNotificationsOnInit();
+        return result;
     }
 
 private:
@@ -271,25 +289,6 @@ private:
         auto chatList = co_await telegram()->sendQueryWithResult(
             ITelegramClient::toPtr(td::td_api::getChats(ITelegramClient::toPtr(td::td_api::chatListMain()), 200)));
         co_return co_await chatIdsToChats(chatList->chat_ids_);
-    }
-
-    AFuture<> sendNotificationsOnInit() {
-        if (!config().checkChatsOnStartup) {
-            co_return;
-        }
-        // tdlib does not send notifications for unread chats on program startup. we'll fix this.
-        auto chats = co_await getChats();
-        chats |= ranges::actions::reverse;   // older first, newest last
-        for (auto& chat : chats) {
-            if (chat->unread_count_ == 0) {
-                continue;
-            }
-            // make up a updateNewMessage event and pass it to handleTelegramEvent. the latter will format a
-            // notification for us.
-            auto notification = _new<td::td_api::updateNewMessage>();
-            notification->message_ = std::move(chat->last_message_);
-            co_await handleTelegramEvent(std::move(notification));
-        }
     }
 
     template <aui::derived_from<td::td_api::Object> Object>
@@ -380,35 +379,36 @@ private:
             "\n</notification>\n"
             "You don't have any chat open. Use #open tool to open the chat";
 
-        const bool isImportant = [&] {
+        const int priority = [&] {
             if (userId == config().papikChatId) {
-                return true;
+                return 1000;
             }
             if (config().wakeUpOnPinnedChat) {
                 for (const auto& position : chat->positions_) {
                     if (position->is_pinned_) {
-                        return true;
+                        return 100;
                     }
                 }
             }
-            return false;
+            return 0;
         }();
 
-        passNotificationToAI(
-            std::move(notification),
-            {
+        notificationManager().passNotificationToAI(NotificationManager::Notification{
+            .message = std::move(notification),
+            .actions = {
               {
                 .name = "open",
                 .description = "Open \"{}\" chat. Use this if you'd like to reply or see messages."_format(chat->title_),
                 .handler = [this, chatId = chat->id_](OpenAITools::Ctx ctx) -> AFuture<AString> {
-                    return llmuiOpenTelegramChat(ctx.tools, chatId);
+                    return llmuiOpenTelegramChat(ctx.logger, ctx.tools, chatId, ctx.temporaryContext);
                 },
               },
-
             },
-            isImportant);
+            .priority = priority,
+            .pin = "<chat id=\"{}\" />"_format(chat->id_),
+        });
 
-        if (isImportant) {
+        if (priority > 0) {
             wakeUpIfSleeping();
         }
 
@@ -434,10 +434,10 @@ private:
     AOptional<CurrentlyOpenedChat> mCurrentlyOpenedChat;
 
 public:
-    AFuture<AString> llmuiOpenTelegramChat(OpenAITools& tools, int64_t chatId) {
+    AFuture<AString> llmuiOpenTelegramChat(ALogger& logger, OpenAITools& tools, int64_t chatId, const IOpenAIChat::Session& temporaryContext) {
         // Check lockdown mode - only allow PAPIK_CHAT_ID if lockdown is enabled
         if (!co_await util::isAccessibleFromLockdown(*telegram(), chatId)) {
-            ALogger::err(LOG_TAG) << "Error: Lockdown mode is enabled. You can only open chat with ID {} (PAPIK_CHAT_ID)."_format(
+            logger.err(LOG_TAG) << "Error: Lockdown mode is enabled. You can only open chat with ID {} (PAPIK_CHAT_ID)."_format(
                 config().papikChatId);
             co_return "No such chat";
         }
@@ -445,7 +445,7 @@ public:
         co_await telegram()->waitForConnection();
         setOnline();
         mTelegram->sendQuery(ITelegramClient::toPtr(td::td_api::openChat(chatId)));
-        removeNotifications("<notification chat_id=\"{}\">\n"_format(chatId));
+        notificationManager().removeNotifications("<notification chat_id=\"{}\">\n"_format(chatId));
 
         _<td::td_api::chat> chat = co_await mTelegram->getChat(chatId);
         mCurrentlyOpenedChat.emplace(*this, chat);
@@ -473,7 +473,7 @@ public:
                     const auto msgFormatting = R"(<message message_id="{}")"_format(msg->id_);
                     length += to_string(msg->content_).length();
                     messages.push_back(std::move(msg));
-                    if (ranges::any_of(temporaryContext(), [&](const IOpenAIChat::Message& msg) {
+                    if (ranges::any_of(temporaryContext, [&](const IOpenAIChat::Message& msg) {
                             return msg.content.contains(msgFormatting);
                         })) {
                         // this message is already in context, which means we don't need to load further.
@@ -490,7 +490,7 @@ public:
                 }
             }
         }();
-        ALOG_DEBUG(LOG_TAG) << "Loaded " << messages.size() << " message(s): " << chat->title_;
+        logger.info(LOG_TAG) << "Loaded " << messages.size() << " message(s): " << chat->title_;
 
         // Compute response-time metadata for Prometheus. messages[0] is the most recent.
         mLastOpenedChatLastMessageTime = [&]() -> AOptional<std::chrono::system_clock::time_point> {
@@ -533,10 +533,11 @@ public:
             }
             // goto naxyi;
         }
+        bool isAdmin = false;
         {
             for (auto& msg : messages | ranges::view::reverse) {
                 auto msgFormatted =
-                    co_await llmui::formatChatHistoryMessage(*telegram(), *msg, *chat, *openAI(), temporaryContext());
+                    co_await llmui::formatChatHistoryMessage(*telegram(), *msg, *chat, *openAI(), temporaryContext);
                 for (const auto& i : chatHistoryMessageProcessors) {
                     msgFormatted = co_await i->processChatHistoryMessage(*chat, *msg, std::move(msgFormatted));
                 }
@@ -607,6 +608,10 @@ public:
                         case td::td_api::chatMemberStatusLeft::ID:
                         case td::td_api::chatMemberStatusBanned::ID:
                             isMember = false;
+                            break;
+                        case td::td_api::chatMemberStatusCreator::ID:
+                        case td::td_api::chatMemberStatusAdministrator::ID:
+                            isAdmin = true;
                             break;
                         default:
                             break;
@@ -688,9 +693,8 @@ Do NOT forward ads, sponsored posts, or low-value content.
 
     naxyi:
         tools = OpenAITools {
-            tools::sendTelegramMessage(
-                telegram(), openAI(), chat, _new<td::td_api::array<td::td_api::object_ptr<td::td_api::message>>>(std::move(messages))),
-            tools::getChatPhoto(telegram(), openAI(), chat, temporaryContext()),
+            tools::sendTelegramMessage(telegram(), openAI(), chat, _new<td::td_api::array<td::td_api::object_ptr<td::td_api::message>>>(std::move(messages))),
+            tools::getChatPhoto(telegram(), openAI(), chat, temporaryContext),
             tools::reactWithEmoji(telegram(), chat),
             tools::removeMessage(telegram(), chat),
             tools::editMessageText(telegram(), chat),
@@ -701,15 +705,21 @@ Do NOT forward ads, sponsored posts, or low-value content.
             tools.insert(tools::stickers::send(telegram(), chat));
         }
 
-        if (config().canLeaveChats) {
-            switch (chat->type_->get_id()) {
-                case td::td_api::chatTypeBasicGroup::ID:
-                case td::td_api::chatTypeSupergroup::ID:
+        switch (chat->type_->get_id()) {
+            case td::td_api::chatTypeBasicGroup::ID:
+            case td::td_api::chatTypeSupergroup::ID:
+
+                if (config().canLeaveChats) {
                     tools.insert(tools::leaveChat(telegram(), chat));
-                    break;
-                default:
-                    break;
-            }
+                }
+                if (isAdmin) {
+                    tools.insert(tools::groupAdminRemoveMessage(telegram(), chat));
+                    tools.insert(tools::groupAdminBanUser(telegram(), chat));
+                    tools.insert(tools::groupAdminSetUserTag(telegram(), chat));
+                }
+                break;
+            default:
+                break;
         }
 
         co_return result;
@@ -750,6 +760,7 @@ AUI_ENTRY {
         AObject::connect(telegram->loggedIn, telegram, [&] {
             auto openAI = _new<OpenAIChatMeasurable>(std::make_unique<OpenAIChatImpl>());
             app = _new<App>(telegram, openAI);
+            async << app->sendNotificationsOnInit();
 
             if (config().proxyEnabled) {
                 auto diary = std::make_shared<Diary>(Diary::Init { .diaryDir = "data/diary", .openAI = openAI });
@@ -804,7 +815,9 @@ AUI_ENTRY {
     IEventLoop::Handle h(&gEventLoop);
     gEventLoop.loop();
 
-    if (app) { async << app->diaryDumpMessages(); }
+    if (app) {
+        async << app->diaryDumpMessages();
+    }
     if (contextBridge) { async << contextBridge->collectAndSaveSessionsNotNewerThan(std::chrono::system_clock::now()); }
 
     while (!async.empty()) { gEventLoop.iteration(); }

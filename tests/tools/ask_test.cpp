@@ -27,12 +27,6 @@ public:
               .diaryDir = "/tmp/kuni_test_ask_diary",
               .openAI = nullptr,
           }) {}
-
-    MOCK_METHOD(
-        (AFuture<AVector<EntryExAndRelatedness>>),
-        query,
-        (const std::valarray<double>& query, QueryOpts opts),
-        (override));
 };
 
 // ---------------------------------------------------------------------------
@@ -119,6 +113,7 @@ TEST(AskTest, HandlerShortQueryError) {
     auto result = util::await_synchronously(tool.handler({
         .tools = tools,
         .args = AJson::Object{{"query", "short"}},
+        .temporaryContext = {},
         .allToolCalls = {},
     }));
 
@@ -142,6 +137,7 @@ TEST(AskTest, HandlerMissingQueryThrows) {
         util::await_synchronously(tool.handler({
             .tools = tools,
             .args = AJson::Object{},
+            .temporaryContext = {},
             .allToolCalls = {},
         })),
         AException
@@ -175,9 +171,6 @@ TEST(AskTest, HandlerSuccessWithToolCall) {
 
     Diary::EntryExAndRelatedness hit{entryList.begin(), 0.9};
 
-    EXPECT_CALL(diary, query(testing::_, testing::_))
-        .WillOnce(Return(AFuture<AVector<Diary::EntryExAndRelatedness>>(AVector<Diary::EntryExAndRelatedness>{hit})));
-
     // LLM: first call returns #query tool call, second returns final answer
     EXPECT_CALL(*openAI, chatStreaming(testing::_, testing::_))
         .WillOnce(Return(makeQueryToolCallResponse("What music does Alex write?")))
@@ -188,6 +181,7 @@ TEST(AskTest, HandlerSuccessWithToolCall) {
     auto result = util::await_synchronously(tool.handler({
         .tools = tools,
         .args = AJson::Object{{"query", "What kind of music does Alex write?"}},
+        .temporaryContext = {},
         .allToolCalls = {},
     }));
 
@@ -209,10 +203,6 @@ TEST(AskTest, HandlerLLMForcedToCallTool) {
     EXPECT_CALL(*openAI, embedding(testing::_, testing::_))
         .WillOnce(Return(AFuture<std::valarray<double>>(dummyEmbedding())));
 
-    // diary returns no entries for simplicity
-    EXPECT_CALL(diary, query(testing::_, testing::_))
-        .WillOnce(Return(AFuture<AVector<Diary::EntryExAndRelatedness>>(AVector<Diary::EntryExAndRelatedness>{})));
-
     // 1st call: no tool_calls (LLM skips step) → gets "you must perform at least one call" message
     // 2nd call: makes the #query tool call
     // 3rd call: returns final answer
@@ -226,6 +216,7 @@ TEST(AskTest, HandlerLLMForcedToCallTool) {
     auto result = util::await_synchronously(tool.handler({
         .tools = tools,
         .args = AJson::Object{{"query", "Tell me about Alex's music habits in detail."}},
+        .temporaryContext = {},
         .allToolCalls = {},
     }));
 
@@ -248,9 +239,6 @@ TEST(AskTest, HandlerWithTemporaryContextEnrichesQuery) {
     EXPECT_CALL(*openAI, embedding(testing::_, testing::_))
         .WillOnce(Return(AFuture<std::valarray<double>>(dummyEmbedding())));
 
-    EXPECT_CALL(diary, query(testing::_, testing::_))
-        .WillOnce(Return(AFuture<AVector<Diary::EntryExAndRelatedness>>(AVector<Diary::EntryExAndRelatedness>{})));
-
     // Capture the messages passed to chat to verify query enrichment
     AString capturedUserContent;
     EXPECT_CALL(*openAI, chatStreaming(testing::_, testing::_))
@@ -271,6 +259,7 @@ TEST(AskTest, HandlerWithTemporaryContextEnrichesQuery) {
     auto result = util::await_synchronously(tool.handler({
         .tools = tools,
         .args = AJson::Object{{"query", "Does Alex play any musical instruments?"}},
+        .temporaryContext = {},
         .allToolCalls = {},
     }));
 
@@ -293,10 +282,6 @@ TEST(AskTest, HandlerDiaryReturnsNoEntries) {
     EXPECT_CALL(*openAI, embedding(testing::_, testing::_))
         .WillOnce(Return(AFuture<std::valarray<double>>(dummyEmbedding())));
 
-    // Empty result from diary
-    EXPECT_CALL(diary, query(testing::_, testing::_))
-        .WillOnce(Return(AFuture<AVector<Diary::EntryExAndRelatedness>>(AVector<Diary::EntryExAndRelatedness>{})));
-
     EXPECT_CALL(*openAI, chatStreaming(testing::_, testing::_))
         .WillOnce(Return(makeQueryToolCallResponse("user hobbies")))
         .WillOnce(Return(makeFinalResponse(kFinalAnswer)));
@@ -306,6 +291,7 @@ TEST(AskTest, HandlerDiaryReturnsNoEntries) {
     auto result = util::await_synchronously(tool.handler({
         .tools = tools,
         .args = AJson::Object{{"query", "What are the user's hobbies and interests?"}},
+        .temporaryContext = {},
         .allToolCalls = {},
     }));
 
