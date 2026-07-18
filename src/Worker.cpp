@@ -87,7 +87,7 @@ static AFuture<> processShortcutOpen(NotificationManager::Notification& notifica
 [[nodiscard]]
 static bool
 processIgnoreChance(ALogger& logger, IOpenAIChat::Session& temporaryContext, bool& canIgnore, const IOpenAIChat::Message& lastLLMResponse) {
-#ifdef AUI_TESTS_MODULE
+#ifndef AUI_TESTS_MODULE
     if (std::uniform_real_distribution(0.f, 1.f)(gRandomEngine) < config().suggestIgnoreChance) {   // attempt to make
                                                                                                     // LLM lazy and
                                                                                                     // ignore message :)

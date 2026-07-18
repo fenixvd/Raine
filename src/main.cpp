@@ -617,8 +617,11 @@ public:
                             break;
                     }
                 } catch (const AException& e) {
-                    // e.g. USER_NOT_PARTICIPANT - treat as not a member.
-                    isMember = false;
+                    // either:
+                    // USER_NOT_PARTICIPANT - treat as not a member.
+                    // or - member list is not accessible (for large channels)
+                    // fallback to chat_lists.
+                    isMember = !chat->chat_lists_.empty();
                 }
 
                 if (!isMember) {

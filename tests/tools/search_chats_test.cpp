@@ -110,14 +110,6 @@ TEST(SearchChatsTest, WithResults) {
             co_return result;
         })
         .WillOnce([&](td::td_api::object_ptr<td::td_api::Function> f) -> AFuture<ITelegramClient::Object> {
-            EXPECT_EQ(f->get_id(), td::td_api::searchPublicChat::ID);
-            auto result = td::td_api::make_object<td::td_api::chat>();
-            result->id_ = config().papikChatId;
-            result->title_ = "Public Chat";
-            result->type_ = td::td_api::make_object<td::td_api::chatTypePrivate>();
-            co_return result;
-        })
-        .WillOnce([&](td::td_api::object_ptr<td::td_api::Function> f) -> AFuture<ITelegramClient::Object> {
             // getChat for formatChatList
             EXPECT_EQ(f->get_id(), td::td_api::getChat::ID);
             auto* getChat = static_cast<td::td_api::getChat*>(f.get());
@@ -128,6 +120,14 @@ TEST(SearchChatsTest, WithResults) {
             chat->title_ = "Found Chat";
             chat->type_ = td::td_api::make_object<td::td_api::chatTypePrivate>();
             co_return chat;
+        })
+        .WillOnce([&](td::td_api::object_ptr<td::td_api::Function> f) -> AFuture<ITelegramClient::Object> {
+            EXPECT_EQ(f->get_id(), td::td_api::searchPublicChat::ID);
+            auto result = td::td_api::make_object<td::td_api::chat>();
+            result->id_ = config().papikChatId;
+            result->title_ = "Public Chat";
+            result->type_ = td::td_api::make_object<td::td_api::chatTypePrivate>();
+            co_return result;
         });
 
     auto tool = tools::searchChats(std::move(telegram));

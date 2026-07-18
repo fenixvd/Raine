@@ -31,42 +31,43 @@ OpenAITools::Tool tools::searchChats(_<ITelegramClient> telegram) {
                 query = query.substr(1);
             }
 
-            auto queryResult = co_await telegram->sendQueryWithResult(ITelegramClient::toPtr(td::td_api::searchChatsOnServer(query, 50)));
-            auto usernameQueryResult = co_await telegram->sendQueryWithResult(ITelegramClient::toPtr(td::td_api::searchPublicChat(query)));
-
-            if (queryResult->chat_ids_.empty() && !usernameQueryResult->id_) {
-                co_return "No chats found satisfying your query.";
-            }
 
             AString result;
-            AVector<_<td::td_api::chat>> chats;
+
             try {
+                auto queryResult = co_await telegram->sendQueryWithResult(ITelegramClient::toPtr(td::td_api::searchChatsOnServer(query, 50)));
                 auto chatFutures =
                     queryResult->chat_ids_ | ranges::view::transform([&](td::td_api::int53 chatId) {
                         return telegram->getChat(chatId);
                     }) |
                     ranges::to_vector;
+
+                AVector<_<td::td_api::chat>> chats;
                 chats.reserve(chatFutures.size());
                 for (const auto& chat : chatFutures) {
                     chats.push_back(co_await chat);
                 }
-            } catch (const AException& e) {
-                ALogger::err("search_chats") << "chatIdsToChats(queryResult->chat_ids_) failed: " << e;
-            }
-            _<td::td_api::chat> publicChat;
+                if (!chats.empty()) {
+                    result += "<existing_chats comment=\"Chats that you participate already\">\n";
+                    co_await llmui::formatChatList(*telegram, result, chats);
+                    result += "</existing_chats>\n";
+                }
+            } catch (const AException& e) {}
 
             try {
-                publicChat = co_await telegram->getChat(usernameQueryResult->id_);
-            } catch (const AException& e) {
-                ALogger::err("search_chats") << "chatIdToChat(usernameQueryResult->id_) failed: " << e;
-            }
+                auto usernameQueryResult = co_await telegram->sendQueryWithResult(ITelegramClient::toPtr(td::td_api::searchPublicChat(query)));
+                if (usernameQueryResult->id_ != 0) {
+                    auto publicChat = co_await telegram->getChat(usernameQueryResult->id_);
 
-            result += "<existing_chats comment=\"Chats that you participate already\">\n";
-            co_await llmui::formatChatList(*telegram, result, chats);
-            result += "</existing_chats>\n";
-            result += "<global_search comment=\"Chats that don't know about you\">\n";
-            co_await llmui::formatChatSingle(*telegram, result, *publicChat);
-            result += "</global_search>\n";
+                    result += "<global_search comment=\"Chats that don't know about you\">\n";
+                    co_await llmui::formatChatSingle(*telegram, result, *publicChat);
+                    result += "</global_search>\n";
+                }
+            } catch (const AException& e) {}
+
+            if (result.empty()) {
+                co_return "No chats found satisfying your query.";
+            }
 
             co_return result;
         },
