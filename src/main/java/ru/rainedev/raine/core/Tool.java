@@ -83,6 +83,11 @@ public record Tool(String name, String description, ObjectNode parameters, Conte
             return property(property, "integer", description, true);
         }
 
+        /** С булевыми параметрами модели справляются надёжнее, чем со строкой «true». */
+        public Builder optionalBoolean(String property, String description) {
+            return property(property, "boolean", description, false);
+        }
+
         private Builder property(String property, String type, String description, boolean isRequired) {
             ObjectNode node = JsonNodeFactory.instance.objectNode();
             node.put("type", type);

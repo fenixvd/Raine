@@ -18,6 +18,14 @@ public final class Main {
     public static void main(String[] args) throws Exception {
         Config config = Config.load();
 
+        // проверить память можно и не поднимая Telegram: так видно ровно одно —
+        // запрос и что на него ответил дневник
+        if (args.length > 0 && args[0].equals("recall")) {
+            ru.rainedev.raine.cli.RecallCommand.run(config, String.join(" ", java.util.Arrays.asList(args).subList(
+                    1, args.length)));
+            return;
+        }
+
         Init.init();
         Log.setLogMessageHandler(1, new Slf4JLogMessageHandler());
 

@@ -29,6 +29,9 @@ public final class Rest {
     private final RandomGenerator random;
     private NightSleep night;
 
+    /** Дневные отлучки можно выключить: остаётся только ночной сон. */
+    private boolean dayNaps = true;
+
     /** Чем заняться, пока спит. Получает отведённое время и признак пробуждения. */
     private java.util.function.BiConsumer<Duration, java.util.function.BooleanSupplier> duringRest = (d, w) -> { };
 
@@ -39,6 +42,10 @@ public final class Rest {
 
     public Rest(RandomGenerator random) {
         this.random = random;
+    }
+
+    public void dayNaps(boolean allowed) {
+        this.dayNaps = allowed;
     }
 
     /** Ночь: спит подолгу и в предсказуемое время, в отличие от дневных отлучек. */
@@ -75,7 +82,7 @@ public final class Rest {
                 return;
             }
         }
-        if (random.nextDouble() >= CHANCE) {
+        if (!dayNaps || random.nextDouble() >= CHANCE) {
             return;
         }
         sleep(Duration.ofMinutes(MIN_MINUTES + random.nextInt(MAX_MINUTES - MIN_MINUTES + 1)), "ненадолго");

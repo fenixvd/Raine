@@ -21,6 +21,9 @@ public interface TelegramActions {
 
     void closeChat(long chatId);
 
+    /** Снимает «печатает...»: иначе индикатор висит ещё несколько секунд после ухода. */
+    void stopTyping(long chatId);
+
     void markRead(long chatId, long[] messageIds);
 
     /** Индикатор «печатает…» — тоже видимое действие на аккаунте. */
@@ -31,7 +34,8 @@ public interface TelegramActions {
 
     void react(long chatId, long messageId, String emoji);
 
-    void forward(long toChatId, long fromChatId, long messageId);
+    /** Все сообщения разом: в Telegram это одна связка, а не несколько пересылок. */
+    void forward(long toChatId, long fromChatId, long[] messageIds);
 
     void deleteMessage(long chatId, long messageId);
 
@@ -40,9 +44,9 @@ public interface TelegramActions {
 
     void blockAndLeave(long chatId);
 
-    void sendSticker(long chatId, int stickerId, Long replyToMessageId);
+    void sendSticker(long chatId, Telegram.StickerRef sticker, Long replyToMessageId);
 
-    void saveSticker(int stickerId);
+    void saveSticker(Telegram.StickerRef sticker);
 
     void saveContact(long userId, String firstName, String lastName);
 
@@ -102,6 +106,14 @@ public interface TelegramActions {
         }
 
         @Override
+        public void stopTyping(long chatId) {
+            TdApi.SendChatAction action = new TdApi.SendChatAction();
+            action.chatId = chatId;
+            action.action = new TdApi.ChatActionCancel();
+            throttled().send(action);
+        }
+
+        @Override
         public void markRead(long chatId, long[] messageIds) {
             throttled().send(new TdApi.ViewMessages(chatId, messageIds, null, false)).join();
         }
@@ -136,11 +148,15 @@ public interface TelegramActions {
         }
 
         @Override
-        public void forward(long toChatId, long fromChatId, long messageId) {
+        public void forward(long toChatId, long fromChatId, long[] messageIds) {
             TdApi.ForwardMessages request = new TdApi.ForwardMessages();
             request.chatId = toChatId;
             request.fromChatId = fromChatId;
-            request.messageIds = new long[] {messageId};
+            request.messageIds = messageIds;
+            // именно пересылка, с указанием источника, а не копия чужого текста
+            // от своего имени
+            request.sendCopy = false;
+            request.removeCaption = false;
             throttled().send(request).join();
         }
 
@@ -175,9 +191,16 @@ public interface TelegramActions {
         }
 
         @Override
-        public void sendSticker(long chatId, int stickerId, Long replyToMessageId) {
+        public void sendSticker(long chatId, Telegram.StickerRef sticker, Long replyToMessageId) {
             TdApi.InputMessageSticker content = new TdApi.InputMessageSticker();
-            content.sticker = new TdApi.InputFileId(stickerId);
+            // по удалённому идентификатору, а не по локальному: локальный привязан
+            // к сессии и после перезапуска указывает в пустоту
+            content.sticker = sticker.remoteId().isEmpty()
+                    ? new TdApi.InputFileId(sticker.fileId())
+                    : new TdApi.InputFileRemote(sticker.remoteId());
+            content.emoji = sticker.emoji();
+            content.width = sticker.width();
+            content.height = sticker.height();
 
             TdApi.SendMessage request = new TdApi.SendMessage();
             request.chatId = chatId;
@@ -191,9 +214,11 @@ public interface TelegramActions {
         }
 
         @Override
-        public void saveSticker(int stickerId) {
+        public void saveSticker(Telegram.StickerRef sticker) {
             TdApi.AddFavoriteSticker request = new TdApi.AddFavoriteSticker();
-            request.sticker = new TdApi.InputFileId(stickerId);
+            request.sticker = sticker.remoteId().isEmpty()
+                    ? new TdApi.InputFileId(sticker.fileId())
+                    : new TdApi.InputFileRemote(sticker.remoteId());
             throttled().send(request).join();
         }
 
@@ -294,6 +319,11 @@ public interface TelegramActions {
         }
 
         @Override
+        public void stopTyping(long chatId) {
+            // индикатор и не показывался
+        }
+
+        @Override
         public void markRead(long chatId, long[] messageIds) {
             log.info("[только чтение] {} сообщений в чате {} остаются непрочитанными", messageIds.length, chatId);
         }
@@ -314,8 +344,8 @@ public interface TelegramActions {
         }
 
         @Override
-        public void forward(long toChatId, long fromChatId, long messageId) {
-            log.info("[только чтение] сообщение {} переслалось бы в чат {}", messageId, toChatId);
+        public void forward(long toChatId, long fromChatId, long[] messageIds) {
+            log.info("[только чтение] {} сообщений переслалось бы в чат {}", messageIds.length, toChatId);
         }
 
         @Override
@@ -329,13 +359,13 @@ public interface TelegramActions {
         }
 
         @Override
-        public void sendSticker(long chatId, int stickerId, Long replyToMessageId) {
-            log.info("[только чтение] в чат {} ушёл бы стикер {}", chatId, stickerId);
+        public void sendSticker(long chatId, Telegram.StickerRef sticker, Long replyToMessageId) {
+            log.info("[только чтение] в чат {} ушёл бы стикер {}", chatId, sticker.emoji());
         }
 
         @Override
-        public void saveSticker(int stickerId) {
-            log.info("[только чтение] стикер {} сохранился бы в избранное", stickerId);
+        public void saveSticker(Telegram.StickerRef sticker) {
+            log.info("[только чтение] стикер {} сохранился бы в избранное", sticker.fileId());
         }
 
         @Override

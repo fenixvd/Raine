@@ -23,6 +23,24 @@ public final class HordeClient {
 
     /** Размеры должны быть кратны 64 — это требование самих моделей. */
     private static final int DIMENSION_STEP = 64;
+
+    /**
+     * По этому заголовку сеть добровольцев узнаёт клиента. Без него запросы
+     * выглядят безымянными и попадают под ограничения первыми.
+     */
+    private static final String CLIENT_AGENT = "raine:1.0:github.com/fenixvd";
+
+    /** Сколько раз повторить запрос, прежде чем считать работу потерянной. */
+    private static final int ATTEMPTS = 3;
+
+    /**
+     * Ждать зависшую раздачу три минуты незачем: проще оборвать и повторить —
+     * картинка на раздаче живёт недолго.
+     */
+    private static final Duration DOWNLOAD_TIMEOUT = Duration.ofSeconds(45);
+
+    /** Насколько сильно переписывать картинку при дорисовке. */
+    private static final double HIRES_DENOISING = 0.7;
     private static final int MIN_DIMENSION = 512;
 
     /**
@@ -69,6 +87,11 @@ public final class HordeClient {
         params.put("n", 1);
         params.put("karras", true);
         params.put("clip_skip", 2);
+        // дорисовка в большем разрешении: картинка рождается в привычном для
+        // модели размере и потом дотягивается. Лица и руки от этого заметно
+        // ровнее — а именно на них спотыкается проверка качества
+        params.put("hires_fix", true);
+        params.put("denoising_strength", HIRES_DENOISING);
 
         ObjectNode body = mapper.createObjectNode();
         // отрицательная часть отделяется от положительной двумя решётками
@@ -92,7 +115,15 @@ public final class HordeClient {
         long deadline = System.currentTimeMillis() + TIMEOUT.toMillis();
         while (System.currentTimeMillis() < deadline) {
             sleep();
-            JsonNode check = get("generate/check/" + id);
+            JsonNode check;
+            try {
+                check = get("generate/check/" + id);
+            } catch (RuntimeException e) {
+                // один сорвавшийся опрос — не повод бросать работу: картинка
+                // уже оплачена кудосами и, возможно, вот-вот будет готова
+                log.warn("Опрос очереди не удался, пробую ещё: {}", e.getMessage());
+                continue;
+            }
             if (check.path("faulted").asBoolean(false)) {
                 throw new IllegalStateException("Очередь не смогла выполнить работу");
             }
@@ -106,7 +137,7 @@ public final class HordeClient {
     }
 
     private String imageUrl(String id) {
-        JsonNode generations = get("generate/status/" + id).path("generations");
+        JsonNode generations = retrying(() -> get("generate/status/" + id)).path("generations");
         if (!generations.isArray() || generations.isEmpty()) {
             throw new IllegalStateException("Работа выполнена, но картинки нет");
         }
@@ -114,9 +145,35 @@ public final class HordeClient {
     }
 
     private byte[] download(String url) {
+        return retrying(() -> downloadOnce(url));
+    }
+
+    /**
+     * Повтор с паузой. Готовая картинка стоила кудосов и живёт на раздаче
+     * недолго — терять её из-за одной оборвавшейся передачи обидно.
+     */
+    private <T> T retrying(java.util.function.Supplier<T> action) {
+        RuntimeException last = null;
+        for (int attempt = 1; attempt <= ATTEMPTS; attempt++) {
+            try {
+                return action.get();
+            } catch (RuntimeException e) {
+                last = e;
+                log.warn("Попытка {} из {} не удалась: {}", attempt, ATTEMPTS, e.getMessage());
+                if (attempt < ATTEMPTS) {
+                    sleep(Duration.ofSeconds(2));
+                }
+            }
+        }
+        throw last;
+    }
+
+    private byte[] downloadOnce(String url) {
         try {
             HttpResponse<byte[]> response = http.send(
-                    HttpRequest.newBuilder(URI.create(url)).timeout(Duration.ofMinutes(2)).GET().build(),
+                    HttpRequest.newBuilder(URI.create(url))
+                            .header("Client-Agent", CLIENT_AGENT)
+                            .timeout(DOWNLOAD_TIMEOUT).GET().build(),
                     HttpResponse.BodyHandlers.ofByteArray());
             if (response.statusCode() / 100 != 2 || response.body().length == 0) {
                 throw new IllegalStateException("Картинку не удалось забрать (%d)".formatted(response.statusCode()));
@@ -135,6 +192,7 @@ public final class HordeClient {
             HttpRequest request = HttpRequest.newBuilder(URI.create(baseUrl + path))
                     .header("Content-Type", "application/json")
                     .header("apikey", apiKey)
+                    .header("Client-Agent", CLIENT_AGENT)
                     .timeout(Duration.ofMinutes(1))
                     .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(body)))
                     .build();
@@ -157,6 +215,7 @@ public final class HordeClient {
             HttpResponse<String> response = http.send(
                     HttpRequest.newBuilder(URI.create(baseUrl + path))
                             .header("apikey", apiKey)
+                            .header("Client-Agent", CLIENT_AGENT)
                             .timeout(Duration.ofSeconds(30))
                             .GET().build(),
                     HttpResponse.BodyHandlers.ofString());
@@ -175,8 +234,12 @@ public final class HordeClient {
     }
 
     private static void sleep() {
+        sleep(POLL_INTERVAL);
+    }
+
+    private static void sleep(Duration howLong) {
         try {
-            Thread.sleep(POLL_INTERVAL);
+            Thread.sleep(howLong);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("Ожидание прервано", e);

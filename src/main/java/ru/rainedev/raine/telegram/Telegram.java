@@ -38,6 +38,12 @@ public final class Telegram {
 
     private static final long CHAT_CACHE_MILLIS = 15_000;
 
+    /**
+     * Одно и то же сообщение за ход спрашивается по нескольку раз: проверка
+     * цитаты, пересылка, правка, удаление. Живёт столько же, сколько чат.
+     */
+    private final ShortLivedCache<String, TdApi.Message> messageCache = new ShortLivedCache<>(CHAT_CACHE_MILLIS);
+
     /** Ждём распознавание не дольше полуминуты: дальше разговор уже остыл. */
     private static final long RECOGNITION_TICK = 500;
     private static final int RECOGNITION_TIMEOUT_TICKS = 60;
@@ -174,23 +180,28 @@ public final class Telegram {
     }
 
     /**
-     * Поиск человека или чата по всем доступным путям сразу.
+     * Поиск человека или чата по всем доступным путям сразу: по своим чатам
+     * находится только то, с кем уже есть переписка, публичный поиск отдаёт
+     * в основном каналы, а человек из контактов, которому ещё не писали,
+     * не находится ни там, ни там.
      * <p>
-     * Одного способа не хватает: по своим чатам находится только то, с кем уже
-     * есть переписка, публичный поиск отдаёт в основном каналы, а человек из
-     * контактов, которому ещё не писали, не находится ни там, ни там.
+     * Найденное делится надвое, и разница существенная: со «своими» разговор
+     * продолжают с того места, где он встал, а к «чужим» приходят с нуля,
+     * и это совсем другой разговор.
+     *
+     * @param mine      те, с кем переписка уже есть, и люди из контактов
+     * @param elsewhere публичные чаты и каналы, которые о ней ничего не знают
      */
-    public List<TdApi.Chat> searchChats(String query, int limit) {
-        String bare = query.startsWith("@") ? query.substring(1) : query;
-        List<TdApi.Chat> found = new ArrayList<>();
-
-        if (query.startsWith("@")) {
-            attempt("публичный чат", () -> {
-                TdApi.SearchPublicChat request = new TdApi.SearchPublicChat();
-                request.username = bare;
-                add(found, throttled().send(request).join());
-            });
+    public record Found(List<TdApi.Chat> mine, List<TdApi.Chat> elsewhere) {
+        public boolean isEmpty() {
+            return mine.isEmpty() && elsewhere.isEmpty();
         }
+    }
+
+    public Found searchChats(String query, int limit) {
+        String bare = query.startsWith("@") ? query.substring(1) : query;
+        List<TdApi.Chat> mine = new ArrayList<>();
+        List<TdApi.Chat> elsewhere = new ArrayList<>();
 
         // люди из контактов — даже те, с кем переписки ещё не было
         attempt("контакты", () -> {
@@ -198,7 +209,7 @@ public final class Telegram {
             request.query = bare;
             request.limit = limit;
             for (long userId : throttled().send(request).join().userIds) {
-                add(found, privateChat(userId));
+                add(mine, privateChat(userId));
             }
         });
 
@@ -207,19 +218,35 @@ public final class Telegram {
             request.query = bare;
             request.limit = limit;
             for (long id : throttled().send(request).join().chatIds) {
-                add(found, chat(id));
+                add(mine, chat(id));
             }
         });
+
+        if (query.startsWith("@")) {
+            attempt("публичный чат", () -> {
+                TdApi.SearchPublicChat request = new TdApi.SearchPublicChat();
+                request.username = bare;
+                add(elsewhere, throttled().send(request).join());
+            });
+        }
 
         attempt("публичный поиск", () -> {
             TdApi.SearchPublicChats publicSearch = new TdApi.SearchPublicChats();
             publicSearch.query = bare;
             for (long id : throttled().send(publicSearch).join().chatIds) {
-                add(found, chat(id));
+                add(elsewhere, chat(id));
             }
         });
 
-        return found.size() > limit ? found.subList(0, limit) : found;
+        // то, что уже нашлось среди своих, во второй список не попадает
+        java.util.Set<Long> known = mine.stream().map(chat -> chat.id).collect(java.util.stream.Collectors.toSet());
+        elsewhere.removeIf(chat -> known.contains(chat.id));
+
+        return new Found(trim(mine, limit), trim(elsewhere, limit));
+    }
+
+    private static List<TdApi.Chat> trim(List<TdApi.Chat> chats, int limit) {
+        return chats.size() > limit ? chats.subList(0, limit) : chats;
     }
 
     /**
@@ -455,7 +482,18 @@ public final class Telegram {
     /**
      * Поиск по тексту внутри чата, при желании только по одному отправителю.
      */
-    public List<TdApi.Message> searchMessages(long chatId, String query, long senderId, int limit) {
+    /**
+     * Найденное вместе с тем, сколько его всего. Без общего числа не понять,
+     * показали ли всё или верхушку, — а от этого зависит, уточнять ли запрос.
+     */
+    public record FoundMessages(List<TdApi.Message> messages, int total) {
+        public boolean isEmpty() {
+            return messages.isEmpty();
+        }
+    }
+
+    public FoundMessages searchMessages(long chatId, String query, long senderId, int limit,
+                                        long fromDaysAgo, long toDaysAgo) {
         TdApi.SearchChatMessages request = new TdApi.SearchChatMessages();
         request.chatId = chatId;
         request.query = query;
@@ -464,15 +502,31 @@ public final class Telegram {
             request.senderId = new TdApi.MessageSenderUser(senderId);
         }
         TdApi.FoundChatMessages found = throttled().send(request).join();
-        return found.messages == null ? List.of() : List.of(found.messages);
+        if (found.messages == null) {
+            return new FoundMessages(List.of(), 0);
+        }
+        // у поиска внутри чата нет диапазона дат в запросе — отсеиваем после
+        List<TdApi.Message> messages = java.util.Arrays.stream(found.messages)
+                .filter(message -> withinDays(message.date, fromDaysAgo, toDaysAgo))
+                .toList();
+        return new FoundMessages(messages, found.totalCount);
     }
 
-    /** Поиск по всем чатам сразу — когда неизвестно, где это было сказано. */
+    private static boolean withinDays(int date, long fromDaysAgo, long toDaysAgo) {
+        long now = System.currentTimeMillis() / 1000;
+        if (fromDaysAgo > 0 && date < now - fromDaysAgo * 86400) {
+            return false;
+        }
+        return !(toDaysAgo > 0 && date > now - toDaysAgo * 86400);
+    }
+
     /**
+     * Поиск по всем чатам сразу — когда неизвестно, где это было сказано.
+     *
      * @param fromDaysAgo не старше стольких дней назад, 0 — без ограничения
      * @param toDaysAgo   не позже стольких дней назад, 0 — до сих пор
      */
-    public List<TdApi.Message> searchAllMessages(String query, int limit, long fromDaysAgo, long toDaysAgo) {
+    public FoundMessages searchAllMessages(String query, int limit, long fromDaysAgo, long toDaysAgo) {
         try {
             TdApi.SearchMessages request = new TdApi.SearchMessages();
             request.query = query;
@@ -482,10 +536,12 @@ public final class Telegram {
             request.minDate = fromDaysAgo > 0 ? (int) (now - fromDaysAgo * 86400) : 0;
             request.maxDate = toDaysAgo > 0 ? (int) (now - toDaysAgo * 86400) : 0;
             TdApi.FoundMessages found = throttled().send(request).join();
-            return found.messages == null ? List.of() : List.of(found.messages);
+            return found.messages == null
+                    ? new FoundMessages(List.of(), 0)
+                    : new FoundMessages(List.of(found.messages), found.totalCount);
         } catch (RuntimeException e) {
             log.debug("Поиск по всем чатам не удался: {}", e.getMessage());
-            return List.of();
+            return new FoundMessages(List.of(), 0);
         }
     }
 
@@ -511,17 +567,31 @@ public final class Telegram {
      * оперирует первым, а Telegram при отправке ждёт второй, поэтому связь
      * между ними приходится помнить.
      */
-    private final Map<Long, Integer> stickerFiles = new ConcurrentHashMap<>();
+    /**
+     * Стикер так, как его понимает Telegram при отправке.
+     * <p>
+     * Здесь два разных идентификатора: локальный живёт только внутри текущей
+     * сессии, а удалённый — постоянный, и именно им стикер отправляют. После
+     * перезапуска локальный номер уже ничего не значит.
+     *
+     * @param remoteId постоянный идентификатор файла
+     */
+    public record StickerRef(int fileId, String remoteId, String emoji, int width, int height) {}
+
+    private final Map<Long, StickerRef> stickerFiles = new ConcurrentHashMap<>();
 
     public void rememberSticker(TdApi.Sticker sticker) {
-        if (sticker != null && sticker.sticker != null) {
-            stickerFiles.put(sticker.id, sticker.sticker.id);
+        if (sticker == null || sticker.sticker == null) {
+            return;
         }
+        String remote = sticker.sticker.remote == null ? "" : sticker.sticker.remote.id;
+        stickerFiles.put(sticker.id, new StickerRef(sticker.sticker.id, remote,
+                sticker.emoji == null ? "" : sticker.emoji, sticker.width, sticker.height));
     }
 
-    /** @return файловый идентификатор стикера или 0, если такой не попадался */
-    public int stickerFile(long stickerId) {
-        return stickerFiles.getOrDefault(stickerId, 0);
+    /** @return что известно про стикер или пусто, если такой не попадался */
+    public Optional<StickerRef> sticker(long stickerId) {
+        return Optional.ofNullable(stickerFiles.get(stickerId));
     }
 
     /** Сохранённые и недавние стикеры — то, чем она реально пользуется. */
@@ -546,12 +616,63 @@ public final class Telegram {
         return result.size() > limit ? result.subList(0, limit) : result;
     }
 
-    public Optional<TdApi.Message> message(long chatId, long messageId) {
+    /**
+     * Отправленное сообщение сначала получает временный номер, и только потом
+     * Telegram присылает настоящий. Если отдать модели временный, она не сможет
+     * ни поправить свою же реплику, ни удалить её: правка уйдёт в никуда.
+     */
+    private final Map<Long, java.util.concurrent.CompletableFuture<Long>> pendingSends = new ConcurrentHashMap<>();
+
+    public void onSendSucceeded(long temporaryId, long finalId) {
+        pendingSends.computeIfAbsent(temporaryId, id -> new java.util.concurrent.CompletableFuture<>())
+                .complete(finalId);
+    }
+
+    /** Отправка не удалась — знать об этом важнее, чем молча идти дальше. */
+    public void onSendFailed(long temporaryId, String reason) {
+        log.warn("Сообщение не отправилось: {}", reason);
+        pendingSends.computeIfAbsent(temporaryId, id -> new java.util.concurrent.CompletableFuture<>())
+                .complete(0L);
+    }
+
+    /**
+     * Ждёт настоящий номер недолго: если Telegram молчит, отдаём тот, что есть, —
+     * ход важнее точности номера.
+     *
+     * @return настоящий номер, 0 при неудачной отправке или временный, если не дождались
+     */
+    public long confirmedId(long temporaryId) {
+        var pending = pendingSends.computeIfAbsent(temporaryId, id -> new java.util.concurrent.CompletableFuture<>());
         try {
-            return Optional.ofNullable(throttled().send(new TdApi.GetMessage(chatId, messageId)).join());
-        } catch (RuntimeException e) {
-            return Optional.empty();
+            return pending.get(SEND_CONFIRMATION_SECONDS, java.util.concurrent.TimeUnit.SECONDS);
+        } catch (java.util.concurrent.TimeoutException e) {
+            log.debug("Telegram не подтвердил отправку {} — беру временный номер", temporaryId);
+            return temporaryId;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return temporaryId;
+        } catch (java.util.concurrent.ExecutionException e) {
+            return temporaryId;
+        } finally {
+            pendingSends.remove(temporaryId);
         }
+    }
+
+    private static final int SEND_CONFIRMATION_SECONDS = 5;
+
+    public Optional<TdApi.Message> message(long chatId, long messageId) {
+        return messageCache.optional(chatId + ":" + messageId, key -> {
+            try {
+                return Optional.ofNullable(throttled().send(new TdApi.GetMessage(chatId, messageId)).join());
+            } catch (RuntimeException e) {
+                return Optional.empty();
+            }
+        });
+    }
+
+    /** Текст правили или сообщение удалили — прежний ответ больше не верен. */
+    public void forgetMessage(long chatId, long messageId) {
+        messageCache.forget(chatId + ":" + messageId);
     }
 
     public void typing(long chatId) {

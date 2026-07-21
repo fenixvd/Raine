@@ -63,18 +63,20 @@ public final class TelegramMedia implements MediaDescriber {
      */
     private String heard(TdApi.Message message, String tag) {
         return telegram.recognizeSpeech(message.chatId, message.id)
-                .map(text -> "<%s transcript>\n%s\n</%s>\n".formatted(tag, text.strip(), tag))
+                // подписью, а не тегом: расшифровка лежит внутри разметки самого
+                // сообщения, и лишний тег там путается с её собственными
+                .map(text -> "[%s transcription]: %s\n".formatted(tag, text.strip()))
                 .orElse("");
     }
 
     /**
-     * Видео описывается по нескольким кадрам сразу. Если формат не поддался
-     * разбору, берём заготовленную Telegram миниатюру: один кадр лучше, чем ничего.
+     * Видео описывается покадрово, с отметками времени. Если формат не поддался
+     * разбору, зовущий берёт заготовленную Telegram миниатюру: один кадр лучше,
+     * чем ничего.
      */
     private String watch(Optional<Integer> fileId) {
         return fileId.flatMap(telegram::download)
-                .flatMap(ru.rainedev.raine.vision.VideoFrames::filmstrip)
-                .map(strip -> vision.describe(strip, Vision.Kind.VIDEO, context.get()))
+                .map(file -> vision.describeVideo(VideoFrames.sample(file), context.get()))
                 .orElse("");
     }
 

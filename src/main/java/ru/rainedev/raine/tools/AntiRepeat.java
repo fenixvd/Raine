@@ -19,13 +19,6 @@ public final class AntiRepeat {
 
     private static final Logger log = LoggerFactory.getLogger(AntiRepeat.class);
 
-    /** Совпадение с одним прошлым сообщением. */
-    private static final double TRIGGER_MAX = 0.95;
-
-    /** Средняя похожесть на всё сказанное — ловит хождение по кругу. */
-    private static final double TRIGGER_AVG = 0.85;
-
-    private static final int MAX_HISTORY = 32;
 
     /**
      * После каждого срабатывания порог временно поднимается. Иначе модель,
@@ -35,14 +28,25 @@ public final class AntiRepeat {
     private static final double INDULGENCE_STEP = 0.07;
 
     private final LlmClient llm;
-    private final String rejectionPrompt;
+    private final java.util.function.Supplier<String> rejectionPrompt;
+    private final ru.rainedev.raine.config.Config.Repeat limits;
     private final Map<String, double[]> spoken = new LinkedHashMap<>();
 
     private double indulgence;
 
     public AntiRepeat(LlmClient llm, String rejectionPrompt) {
+        this(llm, () -> rejectionPrompt);
+    }
+
+    public AntiRepeat(LlmClient llm, java.util.function.Supplier<String> rejectionPrompt) {
+        this(llm, rejectionPrompt, new ru.rainedev.raine.config.Config.Repeat(0.95, 0.85, 32));
+    }
+
+    public AntiRepeat(LlmClient llm, java.util.function.Supplier<String> rejectionPrompt,
+                      ru.rainedev.raine.config.Config.Repeat limits) {
         this.llm = llm;
         this.rejectionPrompt = rejectionPrompt;
+        this.limits = limits;
     }
 
     /** Сообщения из истории чата — чтобы не повторяться и после перезапуска. */
@@ -85,10 +89,10 @@ public final class AntiRepeat {
         }
         double avgSimilarity = sum / spoken.size();
 
-        if (maxSimilarity > TRIGGER_MAX + indulgence) {
+        if (maxSimilarity > limits.triggerMax() + indulgence) {
             reject("повтор сказанного ранее, схожесть %.2f".formatted(maxSimilarity));
         }
-        if (avgSimilarity > TRIGGER_AVG + indulgence) {
+        if (avgSimilarity > limits.triggerAvg() + indulgence) {
             reject("хождение по кругу, средняя схожесть %.2f".formatted(avgSimilarity));
         }
 
@@ -100,11 +104,11 @@ public final class AntiRepeat {
     private void reject(String reason) {
         indulgence += INDULGENCE_STEP;
         log.info("Отклонено как повтор: {}", reason);
-        throw new LowQualityException(rejectionPrompt);
+        throw new LowQualityException(rejectionPrompt.get());
     }
 
     private void forgetOldest() {
-        while (spoken.size() > MAX_HISTORY) {
+        while (spoken.size() > limits.maxHistory()) {
             spoken.remove(spoken.keySet().iterator().next());
         }
     }

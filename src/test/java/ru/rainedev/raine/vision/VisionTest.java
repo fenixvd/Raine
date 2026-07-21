@@ -64,6 +64,44 @@ class VisionTest {
     }
 
     @Test
+    void videoBecomesATimelineWithTimestamps(@TempDir Path dir) {
+        // склеить кадры в одну картинку дешевле, но тогда пропадает главное:
+        // что было раньше, а что позже
+        ScriptedLlm llm = new ScriptedLlm().willSee("кот сидит").willSee("кот роняет чашку");
+
+        String result = visionWith(llm, dir.resolve("cache")).describeVideo(
+                List.of(new VideoFrames.Frame(0, 1, new byte[] {1}),
+                        new VideoFrames.Frame(1, 2, new byte[] {2})),
+                List.of());
+
+        assertEquals(2, llm.looks, "каждый кадр описывается отдельно");
+        assertTrue(result.contains("from=\"0:00\" to=\"0:01\""), result);
+        assertTrue(result.contains("from=\"0:01\" to=\"0:02\""), result);
+        assertTrue(result.contains("кот роняет чашку"), result);
+        assertTrue(result.contains("video transcription"), result);
+    }
+
+    @Test
+    void videoThatCouldNotBeSeenAtAllIsEmpty(@TempDir Path dir) {
+        ScriptedLlm llm = new ScriptedLlm();   // на все кадры отвечает пустотой
+
+        String result = visionWith(llm, dir.resolve("cache")).describeVideo(
+                List.of(new VideoFrames.Frame(0, 1, new byte[] {1})), List.of());
+
+        assertEquals("", result);
+    }
+
+    @Test
+    void videoWithoutFramesIsNotAskedAbout(@TempDir Path dir) {
+        ScriptedLlm llm = new ScriptedLlm().willSee("что-то");
+
+        String result = visionWith(llm, dir.resolve("cache")).describeVideo(List.of(), List.of());
+
+        assertEquals("", result);
+        assertEquals(0, llm.looks, "спрашивать не о чем — незачем и платить");
+    }
+
+    @Test
     void describesPhotoAndMarksItUp(@TempDir Path dir) throws IOException {
         ScriptedLlm llm = new ScriptedLlm().willSee("Человек с котом на руках");
 

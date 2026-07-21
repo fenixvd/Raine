@@ -50,6 +50,37 @@ class PromptsTest {
     }
 
     @Test
+    void missingPromptIsLaidOutFromTheBuild(@TempDir Path dir) {
+        // иначе бот не запустится, пока рядом не окажется всех файлов
+        String loaded = new Prompts(dir, CHARACTER).load("anti_repeat.md");
+
+        assertFalse(loaded.isBlank());
+        assertTrue(Files.exists(dir.resolve("anti_repeat.md")), "промпт должен лечь рядом");
+    }
+
+    @Test
+    void editedPromptIsPickedUpWithoutRestart(@TempDir Path dir) throws IOException {
+        Prompts prompts = new Prompts(dir, CHARACTER);
+        Files.writeString(dir.resolve("a.md"), "первая редакция");
+        assertTrue(prompts.load("a.md").contains("первая"));
+
+        Files.writeString(dir.resolve("a.md"), "вторая редакция");
+
+        assertTrue(prompts.load("a.md").contains("вторая"), "правка должна подхватываться на ходу");
+    }
+
+    @Test
+    void lazyPromptIsReadAtTheMomentItIsNeeded(@TempDir Path dir) throws IOException {
+        Prompts prompts = new Prompts(dir, CHARACTER);
+        Files.writeString(dir.resolve("a.md"), "первая редакция");
+        var lazy = prompts.lazy("a.md");
+
+        Files.writeString(dir.resolve("a.md"), "вторая редакция");
+
+        assertTrue(lazy.get().contains("вторая"));
+    }
+
+    @Test
     void assemblesRealSystemPrompt() {
         Prompts prompts = new Prompts(Path.of("prompts"), CHARACTER);
 

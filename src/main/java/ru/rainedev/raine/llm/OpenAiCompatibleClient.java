@@ -27,6 +27,18 @@ public final class OpenAiCompatibleClient implements LlmClient {
     private static final Logger log = LoggerFactory.getLogger(OpenAiCompatibleClient.class);
     private static final int MAX_ATTEMPTS = 3;
 
+    /**
+     * Предел длины ответа. Без него модель изредка застревает в бесконечном
+     * рассуждении, и ход упирается в предел времени вместо ответа.
+     */
+    private static final int MAX_OUTPUT_TOKENS = 8192;
+
+    /**
+     * Признак разговора. Посредник держит по нему кэш подсказки: при двух
+     * десятках шагов на одно уведомление разница видна прямо в счёте.
+     */
+    private final String sessionId = java.util.UUID.randomUUID().toString();
+
     private final ObjectMapper mapper = new ObjectMapper();
     private final HttpClient http = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(30))
@@ -49,6 +61,8 @@ public final class OpenAiCompatibleClient implements LlmClient {
         ObjectNode body = mapper.createObjectNode();
         body.put("model", config.model());
         body.put("temperature", config.temperature());
+        body.put("max_tokens", MAX_OUTPUT_TOKENS);
+        body.put("session_id", sessionId);
         body.set("messages", mapper.valueToTree(messages));
         if (tools != null && tools.isArray() && !tools.isEmpty()) {
             body.set("tools", tools);
@@ -56,8 +70,13 @@ public final class OpenAiCompatibleClient implements LlmClient {
         }
 
         String response = post("chat/completions", body, Duration.ofMinutes(5));
+        Transcript.save(body, response);
         try {
-            return mapper.readValue(response, ChatResponse.class);
+            ChatResponse parsed = mapper.readValue(response, ChatResponse.class);
+            if (parsed.cacheLooksBroken()) {
+                log.warn("Посредник не кэширует подсказку — каждый шаг оплачивается как первый");
+            }
+            return parsed;
         } catch (IOException e) {
             throw new UncheckedIOException("Не удалось разобрать ответ модели", e);
         }
@@ -72,15 +91,19 @@ public final class OpenAiCompatibleClient implements LlmClient {
         messages.addObject().put("role", "system").put("content", systemPrompt);
 
         // картинка идёт отдельной частью сообщения, а не тегом внутри текста:
-        // так её видит любой OpenAI-совместимый шлюз
+        // так её видит любой OpenAI-совместимый шлюз. Границы вложения при этом
+        // всё равно называются словами: иначе при нескольких картинках непонятно,
+        // где кончается одна и начинается другая
         ObjectNode userMessage = messages.addObject();
         userMessage.put("role", "user");
         var parts = userMessage.putArray("content");
         parts.addObject().put("type", "text").put("text", context);
+        parts.addObject().put("type", "text").put("text", "<attachments>");
         parts.addObject()
                 .put("type", "image_url")
                 .putObject("image_url")
                 .put("url", "data:image/jpeg;base64," + java.util.Base64.getEncoder().encodeToString(image));
+        parts.addObject().put("type", "text").put("text", "</attachments>");
 
         String response = post("chat/completions", body, Duration.ofMinutes(3));
         try {
@@ -119,6 +142,7 @@ public final class OpenAiCompatibleClient implements LlmClient {
             request = HttpRequest.newBuilder(URI.create(baseUrl() + path))
                     .header("Content-Type", "application/json")
                     .header("Authorization", "Bearer " + config.apiKey())
+                    .header("x-session-id", sessionId)
                     .timeout(timeout)
                     .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(body)))
                     .build();

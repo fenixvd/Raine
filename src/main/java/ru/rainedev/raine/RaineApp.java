@@ -49,6 +49,7 @@ public final class RaineApp implements AutoCloseable {
     private Thread brain;
     private Rest rest;
     private TelegramMedia telegramMedia;
+    private Vision vision;
     private Lockdown lockdown;
     private TelegramActions actions;
     private ru.rainedev.raine.core.Surroundings around;
@@ -65,9 +66,22 @@ public final class RaineApp implements AutoCloseable {
                     SimpleAuthenticationSupplier<?> authentication,
                     Config config) {
         this.config = config;
+        // после заморозки аккаунта продолжать нельзя: каждая следующая попытка
+        // только копит отказы
+        ru.rainedev.raine.core.Fatal.handler(error -> {
+            log.error("Останавливаюсь: учётная запись недоступна");
+            stopEverything();
+        });
         builder.addUpdateHandler(TdApi.UpdateAuthorizationState.class, this::onAuthorizationState);
         builder.addUpdateHandler(TdApi.UpdateConnectionState.class, this::onConnectionState);
         builder.addUpdateHandler(TdApi.UpdateNewMessage.class, this::onNewMessage);
+        // Telegram подтверждает отправку отдельным событием и только там называет
+        // настоящий номер сообщения
+        builder.addUpdateHandler(TdApi.UpdateMessageSendSucceeded.class,
+                update -> telegram.onSendSucceeded(update.oldMessageId, update.message.id));
+        builder.addUpdateHandler(TdApi.UpdateMessageSendFailed.class,
+                update -> telegram.onSendFailed(update.oldMessageId,
+                        update.error == null ? "причина неизвестна" : update.error.message));
         this.client = builder.build(authentication);
     }
 
@@ -78,7 +92,8 @@ public final class RaineApp implements AutoCloseable {
     /** Поднимает всё остальное. Вызывается после того, как клиент авторизовался. */
     public void start() {
         telegram = new Telegram(client, config.character().name());
-        lockdown = new Lockdown(Lockdown.Mode.of(config.lockdown()), config.ownerId());
+        lockdown = new Lockdown(Lockdown.Mode.of(config.lockdown()), config.ownerId(),
+                config.lockdownAllowChannels());
         log.info("Круг общения: {}", switch (lockdown.mode()) {
             case NONE -> "все";
             case CONTACTS_ONLY -> "только контакты";
@@ -88,13 +103,14 @@ public final class RaineApp implements AutoCloseable {
         // только по тому, что уже загружено с сервера
         telegram.loadChats(200);
 
+        ru.rainedev.raine.llm.Transcript.enabled(config.llmTranscript());
         Prompts prompts = new Prompts(config.promptsDir(), config.character());
         LlmClient llm = new OpenAiCompatibleClient(config.llm(), config.embeddingModel());
 
         // зрение подключается к разметке: описание встаёт прямо под вложением
         MediaDescriber media = MediaDescriber.NONE;
         if (config.vision().enabled()) {
-            Vision vision = new Vision(llm, prompts, config.vision().cacheDir(),
+            vision = new Vision(llm, prompts, config.vision().cacheDir(),
                     config.vision().model(), config.vision().cheapModel(), config.character().name());
             telegramMedia = new TelegramMedia(telegram, vision, () -> loop == null ? List.of() : loop.context());
             media = telegramMedia;
@@ -115,7 +131,8 @@ public final class RaineApp implements AutoCloseable {
         }
 
         tools = new TelegramTools(telegram, actions, new ChatScreen(formatter, prompts), lockdown,
-                new AntiRepeat(llm, prompts.load("anti_repeat.md")));
+                new AntiRepeat(llm, prompts.lazy("anti_repeat.md"), config.repeat()));
+        tools.behaviour(config.behaviour());
         if (telegramMedia != null) {
             tools.media(telegramMedia);
         }
@@ -133,7 +150,7 @@ public final class RaineApp implements AutoCloseable {
 
         var voiceGenerator = new ru.rainedev.raine.speech.VoiceGenerator(config.voice(), config.voice().directory());
         if (voiceGenerator.isAvailable()) {
-            tools.voice(voiceGenerator, config.voice().directory(), prompts.load("record_audio_speech.md"));
+            tools.voice(voiceGenerator, config.voice().directory(), prompts.lazy("record_audio_speech.md"));
         } else {
             log.info("Синтез речи не настроен: голосовые записывать нечем");
         }
@@ -144,9 +161,11 @@ public final class RaineApp implements AutoCloseable {
         // ask доступен всегда: заглянуть в память можно в любой момент хода
         Toolbox always = new Toolbox();
         WebSearch web = new WebSearch(config.webSearchUrl(), config.webSearchKey());
-        Recall recall = new Recall(diary, llm, prompts.load("character_base.md"), web);
+        Recall recall = new Recall(diary, llm, prompts.lazy("character_base.md"), web);
         always.add(recall.asTool(this::currentSituation));
-        always.add(tools.stickers().list());
+        if (config.behaviour().stickers()) {
+            always.add(tools.stickers().list());
+        }
         always.add(tools.chatList());
         always.add(tools.contactList());
         always.add(tools.saveContact());
@@ -161,9 +180,9 @@ public final class RaineApp implements AutoCloseable {
                 llm,
                 () -> prompts.system(around.asPromptSuffix() + workingMemory.asPromptSuffix()),
                 always, config.contextTokenLimit());
-        loop.memory(new DiaryMemory(diary, llm, config.diaryInjectionMaxLength()));
+        loop.memory(new DiaryMemory(diary, llm, config.diaryInjectionMaxLength(), config.diaryMinRelatedness()));
         DiaryWriter writer = new DiaryWriter(
-                diary, llm, prompts.load("diary_save.md"), config.diaryPlagiarismThreshold());
+                diary, llm, prompts.lazy("diary_save.md"), config.diaryPlagiarismThreshold());
         loop.onContextOverflow(() -> {
             // разговор не выбрасываем, а переносим в долгую память
             log.info("Контекст переполнен — переношу разговор в дневник");
@@ -178,7 +197,11 @@ public final class RaineApp implements AutoCloseable {
             diary.reload();
         });
 
+        // ход закончен — выходим из чатов, в которые заходили
+        loop.onNotificationDone(done -> tools.closeOpened());
+
         rest = new Rest(random);
+        rest.dayNaps(config.behaviour().dayNaps());
         loop.rest(rest);
 
         if (config.night().enabled()) {
@@ -193,8 +216,8 @@ public final class RaineApp implements AutoCloseable {
 
         if (config.sleepConsolidation()) {
             var consolidation = new ru.rainedev.raine.memory.SleepConsolidation(
-                    diary, llm, prompts.load("sleep_consolidator.md"),
-                    config.diaryDir().resolve("archive"), 4000, random);
+                    diary, llm, prompts.lazy("sleep_consolidator.md"),
+                    config.diaryDir().resolve("archive"), config.diaryConsolidationBudget(), random);
             rest.duringRest(consolidation::run);
             log.info("Пересмотр памяти во сне включён");
         }
@@ -220,9 +243,10 @@ public final class RaineApp implements AutoCloseable {
      */
     private void onPhotoOutcome(long chatId, boolean ready, String message) {
         String text = ready
-                ? ("Your photo is ready.\n\nFilename: %s\n\nOpen the chat and send it with "
+                ? ("Your photo is ready.\n\n%s\nFilename: %s\n\nOpen the chat and send it with "
                    + "send_telegram_message if you like it, or take another one. Mention the filename "
-                   + "in your diary — you may want to reuse the photo later.").formatted(message)
+                   + "in your diary — you may want to reuse the photo later.")
+                        .formatted(lookAtOwnPhoto(message), message)
                 : "Your photo did not work out: " + message + ". You can try again or let it go.";
 
         Toolbox available = new Toolbox();
@@ -232,6 +256,23 @@ public final class RaineApp implements AutoCloseable {
     }
 
     /** Последняя реплика в контексте — чтобы подагент искал по делу, а не вообще. */
+    /**
+     * Собственный снимок она сначала разглядывает, а потом решает, отправлять ли.
+     * Без описания выбор делается вслепую: «файл готов» — и всё.
+     */
+    private String lookAtOwnPhoto(String fileName) {
+        if (vision == null) {
+            return "";
+        }
+        try {
+            return vision.describe(config.camera().gallery().resolve(fileName),
+                    Vision.Kind.PHOTO, loop == null ? List.of() : loop.context());
+        } catch (RuntimeException e) {
+            log.debug("Свой снимок не разглядеть: {}", e.getMessage());
+            return "";
+        }
+    }
+
     private String currentSituation() {
         var context = loop.context();
         return context.isEmpty() ? "" : String.valueOf(context.getLast().content());
@@ -393,13 +434,23 @@ public final class RaineApp implements AutoCloseable {
 
         // сообщение владельца и закреплённые чаты идут вне очереди: остальное
         // подождёт, а это — то, ради чего она вообще здесь
-        boolean important = senderId == config.ownerId() || telegram.isPinned(chat.id);
+        boolean important = senderId == config.ownerId()
+                || (config.behaviour().wakeOnPinnedChat() && telegram.isPinned(chat.id));
         if (important) {
             loop.submitFirst(new Notification(text, available));
             log.info("Уведомление из чата \"{}\" — вне очереди", chat.title);
         } else {
             loop.submit(new Notification(text, available));
             log.info("Уведомление из чата \"{}\" поставлено в очередь", chat.title);
+        }
+    }
+
+    /** Остановка по непоправимой причине: разбудить main, чтобы процесс завершился. */
+    private void stopEverything() {
+        try {
+            close();
+        } catch (Exception e) {
+            log.warn("При остановке что-то пошло не так: {}", e.getMessage());
         }
     }
 

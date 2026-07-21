@@ -26,7 +26,7 @@ class MediaInMessageTest {
     @Test
     void transcriptAppearsUnderTheAttachment() {
         MessageFormatter formatter = new MessageFormatter(id -> "John", MessageFormatter.ReplyLookup.NONE,
-                message -> "<voice transcript>\nпривет, как ты там\n</voice transcript>");
+                message -> "[voice transcription]: привет, как ты там\n");
 
         String result = formatter.format(voiceMessage(), view);
 

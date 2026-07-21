@@ -52,8 +52,10 @@ public final class WebSearch {
 
             HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() / 100 != 2) {
-                log.warn("Веб-поиск вернул {}", response.statusCode());
-                return "Web search failed";
+                log.warn("Веб-поиск вернул {}: {}", response.statusCode(), response.body());
+                // причина передаётся как есть: «кончилась квота» и «нет сети» —
+                // это разные вещи, и решать, что делать дальше, ей
+                return "Web search failed (%d): %s".formatted(response.statusCode(), shorten(response.body()));
             }
             return render(mapper.readTree(response.body()).path("results"), query);
         } catch (InterruptedException e) {
@@ -61,8 +63,14 @@ public final class WebSearch {
             return "Web search interrupted";
         } catch (Exception e) {
             log.warn("Веб-поиск не удался: {}", e.getMessage());
-            return "Web search failed";
+            return "Web search failed: " + e.getMessage();
         }
+    }
+
+    /** Ответ службы бывает многословным, а в контексте нужна суть. */
+    private static String shorten(String body) {
+        String text = body == null ? "" : body.strip().replace("\n", " ");
+        return text.length() > 300 ? text.substring(0, 300) + "..." : text;
     }
 
     private static String render(JsonNode results, String query) {

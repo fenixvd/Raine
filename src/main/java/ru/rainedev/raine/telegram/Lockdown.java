@@ -31,10 +31,21 @@ public final class Lockdown {
 
     private final Mode mode;
     private final long ownerId;
+    private final boolean allowChannels;
 
     public Lockdown(Mode mode, long ownerId) {
+        this(mode, ownerId, true);
+    }
+
+    /**
+     * @param allowChannels читать ли каналы, когда круг общения сужен. Обычно да:
+     *                      канал — это лента, а не собеседник. Но иногда хочется
+     *                      тишины совсем
+     */
+    public Lockdown(Mode mode, long ownerId, boolean allowChannels) {
         this.mode = mode;
         this.ownerId = ownerId;
+        this.allowChannels = allowChannels;
     }
 
     public Mode mode() {
@@ -48,7 +59,7 @@ public final class Lockdown {
         // каналы — это лента новостей: ответить туда нельзя, и написать ей оттуда
         // тоже. Читать их не запрещаем даже в самом строгом режиме
         if (ChatKind.of(chat) == ChatKind.CHANNEL) {
-            return true;
+            return allowChannels;
         }
         if (chat.type instanceof TdApi.ChatTypePrivate priv && priv.userId == ownerId) {
             return true;

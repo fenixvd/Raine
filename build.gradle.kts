@@ -35,6 +35,12 @@ application {
     mainClass = "ru.rainedev.raine.Main"
 }
 
+// Промпты едут внутри сборки: если рядом с ботом их не окажется,
+// он выложит их из себя и запустится, а не упадёт на первом же файле.
+tasks.processResources {
+    from("prompts") { into("prompts") }
+}
+
 tasks.test {
     useJUnitPlatform {
         // тесты, которые ходят в сеть и тратят токены, по умолчанию не гоняем

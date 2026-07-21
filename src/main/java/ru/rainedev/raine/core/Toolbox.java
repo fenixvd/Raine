@@ -64,11 +64,17 @@ public final class Toolbox {
      * его обрабатывает цикл.
      */
     public List<ru.rainedev.raine.llm.Message> invoke(List<ToolCall> calls) {
-        List<ru.rainedev.raine.llm.Message> results = new ArrayList<>();
-        for (ToolCall call : calls) {
-            results.add(ru.rainedev.raine.llm.Message.toolResult(call.id(), clean(invokeOne(call))));
+        // инструменту бывает важно знать, один ли он в этом шаге
+        CurrentStep.set(calls);
+        try {
+            List<ru.rainedev.raine.llm.Message> results = new ArrayList<>();
+            for (ToolCall call : calls) {
+                results.add(ru.rainedev.raine.llm.Message.toolResult(call.id(), clean(invokeOne(call))));
+            }
+            return results;
+        } finally {
+            CurrentStep.clear();
         }
-        return results;
     }
 
     private String invokeOne(ToolCall call) {
@@ -83,6 +89,7 @@ public final class Toolbox {
         } catch (LowQualityException e) {
             throw e;
         } catch (RuntimeException e) {
+            Fatal.check(e);
             String reason = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
             return "Не получилось: " + reason;
         }

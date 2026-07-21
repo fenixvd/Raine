@@ -49,10 +49,15 @@ public final class Recall {
 
     private final Diary diary;
     private final LlmClient llm;
-    private final String characterPrompt;
+    private final java.util.function.Supplier<String> characterPrompt;
     private final ru.rainedev.raine.tools.WebSearch web;
 
     public Recall(Diary diary, LlmClient llm, String characterPrompt, ru.rainedev.raine.tools.WebSearch web) {
+        this(diary, llm, () -> characterPrompt, web);
+    }
+
+    public Recall(Diary diary, LlmClient llm, java.util.function.Supplier<String> characterPrompt,
+                  ru.rainedev.raine.tools.WebSearch web) {
         this.diary = diary;
         this.llm = llm;
         this.characterPrompt = characterPrompt;
@@ -110,7 +115,7 @@ public final class Recall {
         Toolbox tools = new Toolbox(searchTool(alreadyGiven));
 
         List<Message> session = new ArrayList<>();
-        session.add(Message.user("<character>\n" + characterPrompt + "\n</character>\n\n" + question));
+        session.add(Message.user("<character>\n" + characterPrompt.get() + "\n</character>\n\n" + question));
 
         boolean searched = false;
         for (int step = 0; step < MAX_STEPS; step++) {
@@ -146,13 +151,13 @@ public final class Recall {
                 .requiredString("text", "Retrieval cue that is likely to appear in memory pieces. Include as many "
                         + "keywords as possible; maintain meaning of the request.");
         if (web.isAvailable()) {
-            builder.optionalString("include_web_search_results", "Set to \"true\" when looking for public or "
+            builder.optionalBoolean("include_web_search_results", "Set to true when looking for public or "
                     + "recent information the diary cannot contain: weather, news, facts.");
         }
         return builder.build(arguments -> {
             String cue = arguments.path("text").asText("").strip();
             String fromDiary = search(cue, alreadyGiven);
-            if (!"true".equalsIgnoreCase(arguments.path("include_web_search_results").asText("false"))) {
+            if (!ru.rainedev.raine.core.Numbers.flagAt(arguments, "include_web_search_results")) {
                 return fromDiary;
             }
             return "<local_db_results>\n" + fromDiary + "\n</local_db_results>\n"

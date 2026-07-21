@@ -15,6 +15,8 @@ import ru.rainedev.raine.config.Config;
  */
 public final class Prompts {
 
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(Prompts.class);
+
     private static final Pattern PLACEHOLDER = Pattern.compile("\\$\\{([A-Z_]+)}");
 
     /** Заголовок файла между строками "---" — комментарий для людей, модели он не нужен. */
@@ -46,9 +48,18 @@ public final class Prompts {
         return result.toString();
     }
 
-    /** Читает промпт, срезает служебный заголовок и подставляет переменные. */
+    /**
+     * Читает промпт, срезает служебный заголовок и подставляет переменные.
+     * <p>
+     * Файл читается каждый раз заново: правка характера подхватывается на ходу,
+     * без перезапуска. Если файла рядом нет, он выкладывается из сборки — так
+     * бот запускается «из коробки», а не падает на первом же промпте.
+     */
     public String load(String fileName) {
         Path file = dir.resolve(fileName);
+        if (!Files.exists(file)) {
+            layOut(fileName, file);
+        }
         String raw;
         try {
             raw = Files.readString(file);
@@ -56,6 +67,24 @@ public final class Prompts {
             throw new UncheckedIOException("Не найден промпт " + file, e);
         }
         return substitute(HEADER.matcher(raw).replaceFirst("").strip());
+    }
+
+    /** Промпт, читаемый в тот момент, когда он понадобится, а не при запуске. */
+    public java.util.function.Supplier<String> lazy(String fileName) {
+        return () -> load(fileName);
+    }
+
+    private void layOut(String fileName, Path file) {
+        try (var bundled = Prompts.class.getResourceAsStream("/prompts/" + fileName)) {
+            if (bundled == null) {
+                throw new IllegalStateException("Нет промпта " + file + ", и в сборке его тоже нет");
+            }
+            Files.createDirectories(dir);
+            Files.write(file, bundled.readAllBytes());
+            log.info("Промпт {} выложен из сборки", file);
+        } catch (IOException e) {
+            throw new UncheckedIOException("Не удалось выложить промпт " + file, e);
+        }
     }
 
     private String substitute(String text) {

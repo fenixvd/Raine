@@ -27,10 +27,15 @@ public final class DiaryWriter {
 
     private final Diary diary;
     private final LlmClient llm;
-    private final String savePrompt;
+    private final java.util.function.Supplier<String> savePrompt;
     private final double plagiarismThreshold;
 
     public DiaryWriter(Diary diary, LlmClient llm, String savePrompt, double plagiarismThreshold) {
+        this(diary, llm, () -> savePrompt, plagiarismThreshold);
+    }
+
+    public DiaryWriter(Diary diary, LlmClient llm, java.util.function.Supplier<String> savePrompt,
+                       double plagiarismThreshold) {
         this.diary = diary;
         this.llm = llm;
         this.savePrompt = savePrompt;
@@ -53,7 +58,7 @@ public final class DiaryWriter {
 
     private String askForSummary(String systemPrompt, List<Message> context) {
         List<Message> conversation = new ArrayList<>(context);
-        conversation.add(Message.user(savePrompt));
+        conversation.add(Message.user(savePrompt.get()));
 
         for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
             ChatResponse response = llm.chat(systemPrompt, conversation, null);

@@ -7,64 +7,64 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
 import javax.imageio.ImageIO;
 import org.jcodec.api.FrameGrab;
-import org.jcodec.scale.AWTUtil;
 import org.jcodec.common.io.NIOUtils;
+import org.jcodec.scale.AWTUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Достаёт из видео несколько кадров и склеивает их в одну картинку.
+ * Разбирает видео на кадры с отметками времени.
  * <p>
- * Склейка — не экономия ради экономии: по трём кадрам подряд видно движение
- * и развитие, а описывать каждый отдельно означало бы три обращения к модели
- * вместо одного и потерю связи между ними.
+ * Кадр в секунду, но не больше шестнадцати на всё видео: реже — и движение
+ * теряется, чаще — платим за одно и то же. Минутный ролик от этого сжимается,
+ * но остаётся видно, что было в начале, а что в конце.
  */
 public final class VideoFrames {
 
     private static final Logger log = LoggerFactory.getLogger(VideoFrames.class);
 
-    private static final int FRAME_COUNT = 3;
+    /** Не чаще одного кадра в секунду. */
+    private static final double MIN_STEP_SECONDS = 1.0;
 
-    /** Шире делать незачем: модель всё равно смотрит на уменьшенное. */
-    private static final int TILE_WIDTH = 512;
+    /** И не больше этого числа на всё видео, каким бы длинным оно ни было. */
+    private static final int MAX_FRAMES = 16;
+
+    /** Больше модели всё равно не нужно. */
+    private static final int MAX_SIDE = 512;
+
+    /**
+     * Один кадр и промежуток, который он представляет.
+     *
+     * @param from секунда, на которой кадр снят
+     * @param to   до какой секунды он «держится»
+     */
+    public record Frame(double from, double to, byte[] jpeg) {}
 
     private VideoFrames() {}
 
-    /** @return склеенная лента кадров или пусто, если видео не поддалось */
-    public static Optional<byte[]> filmstrip(Path video) {
-        List<BufferedImage> frames = grab(video);
-        if (frames.isEmpty()) {
-            return Optional.empty();
-        }
-        try {
-            return Optional.of(toJpeg(tile(frames)));
-        } catch (IOException e) {
-            log.debug("Кадры не склеились: {}", e.getMessage());
-            return Optional.empty();
-        }
-    }
-
-    private static List<BufferedImage> grab(Path video) {
-        List<BufferedImage> frames = new ArrayList<>();
+    /** @return кадры от начала к концу; пусто, если формат не поддался разбору */
+    public static List<Frame> sample(Path video) {
+        List<Frame> frames = new ArrayList<>();
         try (var channel = NIOUtils.readableChannel(video.toFile())) {
             FrameGrab grab = FrameGrab.createFrameGrab(channel);
             double duration = grab.getVideoTrack() == null || grab.getVideoTrack().getMeta() == null
                     ? 0.0 : grab.getVideoTrack().getMeta().getTotalDuration();
+            int count = countFor(duration);
 
-            for (int i = 0; i < FRAME_COUNT; i++) {
-                // кадры берём с равными промежутками: начало, середина, конец
-                double at = duration > 0 ? duration * (i + 0.5) / FRAME_COUNT : 0;
+            for (int i = 0; i < count; i++) {
+                double at = count > 1 ? duration * i / (count - 1) : 0;
+                double until = count > 1 && i + 1 < count
+                        ? duration * (i + 1) / (count - 1)
+                        : at + MIN_STEP_SECONDS;
                 grab.seekToSecondPrecise(at);
                 BufferedImage frame = AWTUtil.toBufferedImage(grab.getNativeFrame());
-                if (frame != null) {
-                    frames.add(frame);
+                if (frame == null) {
+                    log.debug("Кадр на {} с не декодировался", at);
+                    continue;
                 }
-                if (duration <= 0) {
-                    break;   // длительность неизвестна — довольствуемся первым кадром
-                }
+                frames.add(new Frame(at, until, toJpeg(fit(frame))));
             }
         } catch (Exception e) {
             // формат может оказаться неподдерживаемым — это не повод ломать разговор
@@ -73,28 +73,33 @@ public final class VideoFrames {
         return frames;
     }
 
-    private static BufferedImage tile(List<BufferedImage> frames) {
-        int height = 0;
-        List<BufferedImage> scaled = new ArrayList<>();
-        for (BufferedImage frame : frames) {
-            int scaledHeight = Math.max(1, frame.getHeight() * TILE_WIDTH / Math.max(1, frame.getWidth()));
-            BufferedImage resized = new BufferedImage(TILE_WIDTH, scaledHeight, BufferedImage.TYPE_INT_RGB);
-            Graphics2D graphics = resized.createGraphics();
-            graphics.drawImage(frame, 0, 0, TILE_WIDTH, scaledHeight, null);
-            graphics.dispose();
-            scaled.add(resized);
-            height += scaledHeight;
+    static int countFor(double durationSeconds) {
+        if (durationSeconds <= 0) {
+            return 1;
         }
+        return (int) Math.clamp((long) Math.ceil(durationSeconds / MIN_STEP_SECONDS), 1, MAX_FRAMES);
+    }
 
-        BufferedImage strip = new BufferedImage(TILE_WIDTH, height, BufferedImage.TYPE_INT_RGB);
-        Graphics2D graphics = strip.createGraphics();
-        int y = 0;
-        for (BufferedImage frame : scaled) {
-            graphics.drawImage(frame, 0, y, null);
-            y += frame.getHeight();
+    /** Отметка времени в привычном виде: 0:07, 1:23. */
+    public static String timestamp(double seconds) {
+        int whole = (int) Math.round(seconds);
+        return "%d:%02d".formatted(whole / 60, whole % 60);
+    }
+
+    private static BufferedImage fit(BufferedImage frame) {
+        int width = frame.getWidth();
+        int height = frame.getHeight();
+        if (width <= MAX_SIDE && height <= MAX_SIDE) {
+            return frame;
         }
+        double scale = Math.min(MAX_SIDE / (double) width, MAX_SIDE / (double) height);
+        int newWidth = Math.max(1, (int) (width * scale));
+        int newHeight = Math.max(1, (int) (height * scale));
+        BufferedImage resized = new BufferedImage(newWidth, newHeight, BufferedImage.TYPE_INT_RGB);
+        Graphics2D graphics = resized.createGraphics();
+        graphics.drawImage(frame, 0, 0, newWidth, newHeight, null);
         graphics.dispose();
-        return strip;
+        return resized;
     }
 
     private static byte[] toJpeg(BufferedImage image) throws IOException {

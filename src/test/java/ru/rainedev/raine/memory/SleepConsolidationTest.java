@@ -110,6 +110,28 @@ class SleepConsolidationTest {
     }
 
     @Test
+    void diaryIsGoneOverAgainWhileTheNightLasts(@TempDir Path dir) {
+        // за долгую ночь память пересматривается глубже одного прохода,
+        // но круг, не изменивший ничего, — последний: остаток ночи проходит спокойно
+        Diary diary = new Diary(dir);
+        for (int i = 0; i < 4; i++) {
+            diary.save("Запись номер " + i + " про поездку и разговоры", new double[] {1, 0, 0});
+        }
+
+        ScriptedLlm llm = new ScriptedLlm()
+                .willAnswer("{\"confidence\":0.5}\nСведено, заход первый.")
+                .willAnswer("{\"confidence\":0.5}\nСведено, заход второй.")
+                .willAnswer("{\"confidence\":0.5}\nСведено, заход третий.");
+
+        // короткий предел объёма: записи сводятся по нескольку, а не все разом
+        new SleepConsolidation(diary, llm, "перепиши", dir.resolve("archive"), 20, new Random(1))
+                .run(Duration.ofMinutes(5), () -> false);
+
+        assertTrue(llm.chatCalls >= 2, "после первого прохода работа продолжается: " + llm.chatCalls);
+        assertTrue(llm.chatCalls < 20, "и всё же останавливается, а не крутится всю ночь: " + llm.chatCalls);
+    }
+
+    @Test
     void wakingUpStopsTheWork(@TempDir Path dir) {
         Diary diary = new Diary(dir);
         for (int i = 0; i < 5; i++) {

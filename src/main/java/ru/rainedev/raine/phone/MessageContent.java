@@ -39,8 +39,12 @@ public final class MessageContent {
             case TdApi.MessageVenue venue -> "[место] " + venue.venue.title + " — " + venue.venue.address;
             case TdApi.MessageProximityAlertTriggered ignored -> "[оказались рядом]";
 
+            // номер телефона — это половина смысла присланного контакта:
+            // без него непонятно, чем этим контактом вообще пользоваться
             case TdApi.MessageContact contact ->
-                    "[контакт] " + (contact.contact.firstName + " " + contact.contact.lastName).strip();
+                    "[контакт] " + (contact.contact.firstName + " " + contact.contact.lastName).strip()
+                            + (contact.contact.phoneNumber == null || contact.contact.phoneNumber.isBlank()
+                                    ? "" : ", " + contact.contact.phoneNumber);
             case TdApi.MessageContactRegistered ignored -> "[этот человек только что появился в Telegram]";
             case TdApi.MessageUsersShared ignored -> "[поделились контактами]";
             case TdApi.MessageChatShared ignored -> "[поделились чатом]";
@@ -107,12 +111,13 @@ public final class MessageContent {
             case TdApi.MessageScreenshotTaken ignored -> "[сделали скриншот переписки]";
 
             // что происходит вокруг в группах и каналах
-            case TdApi.MessagePinMessage ignored -> "[закрепили сообщение]";
+            case TdApi.MessagePinMessage pinned ->
+                    "[закрепили сообщение] message_id=" + pinned.messageId;
             case TdApi.MessageChatAddMembers add ->
                     "[в чат добавили участников] " + (add.memberUserIds == null ? 0 : add.memberUserIds.length);
             case TdApi.MessageChatJoinByLink ignored -> "[присоединился по ссылке]";
             case TdApi.MessageChatJoinByRequest ignored -> "[приняли заявку в чат]";
-            case TdApi.MessageChatDeleteMember ignored -> "[участник вышел]";
+            case TdApi.MessageChatDeleteMember left -> "[участник вышел] user_id=" + left.userId;
             case TdApi.MessageChatChangeTitle title -> "[чат переименован] " + title.title;
             case TdApi.MessageChatChangePhoto ignored -> "[сменили фото чата]";
             case TdApi.MessageChatDeletePhoto ignored -> "[убрали фото чата]";
@@ -170,14 +175,11 @@ public final class MessageContent {
         return out.toString();
     }
 
+    /** Звонок размечен тегом: на него потом можно сослаться так же, как на вложение. */
     private static String call(TdApi.MessageCall call) {
-        if (call.discardReason instanceof TdApi.CallDiscardReasonMissed) {
-            return call.isVideo ? "[пропущенный видеозвонок]" : "[пропущенный звонок]";
-        }
-        if (call.discardReason instanceof TdApi.CallDiscardReasonDeclined) {
-            return "[звонок отклонён]";
-        }
-        return (call.isVideo ? "[видеозвонок] " : "[звонок] ") + call.duration + " с";
+        String outcome = call.discardReason instanceof TdApi.CallDiscardReasonMissed ? " missed"
+                : call.discardReason instanceof TdApi.CallDiscardReasonDeclined ? " declined" : "";
+        return "<call is_video=\"%s\" duration=\"%d\"%s />".formatted(call.isVideo, call.duration, outcome);
     }
 
     private static String linkPreview(TdApi.LinkPreview preview) {

@@ -54,11 +54,25 @@ public final class MessageFormatter {
     public record ChatView(long myId, long lastReadInboxMessageId) {}
 
     public String format(TdApi.Message message, ChatView view) {
-        return format(message, view, "message");
+        return format(message, view, "message", false);
+    }
+
+    /**
+     * @param isTarget пометка «вот это искали» ставится атрибутом в самом теге,
+     *                 а не строкой сверху: так она не путается с содержимым
+     *                 соседнего сообщения
+     */
+    public String format(TdApi.Message message, ChatView view, boolean isTarget) {
+        return format(message, view, "message", isTarget);
     }
 
     private String format(TdApi.Message message, ChatView view, String tag) {
+        return format(message, view, tag, false);
+    }
+
+    private String format(TdApi.Message message, ChatView view, String tag, boolean isTarget) {
         StringBuilder attributes = new StringBuilder(tag)
+                .append(isTarget ? " target" : "")
                 .append(" message_id=\"").append(message.id).append('"')
                 .append(" date=\"").append(DATE.format(Instant.ofEpochSecond(message.date))).append('"');
 

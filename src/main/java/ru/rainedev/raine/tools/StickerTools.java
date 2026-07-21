@@ -24,9 +24,16 @@ public final class StickerTools {
     private final TelegramActions actions;
     private TelegramMedia media;
 
+    /** Отправлять стикер можно ровно туда же, куда и обычное сообщение. */
+    private java.util.function.LongPredicate allowed = chatId -> true;
+
     public StickerTools(Telegram telegram, TelegramActions actions) {
         this.telegram = telegram;
         this.actions = actions;
+    }
+
+    public void allowedTo(java.util.function.LongPredicate allowed) {
+        this.allowed = allowed;
     }
 
     public void media(TelegramMedia media) {
@@ -67,15 +74,15 @@ public final class StickerTools {
                 .describedAs("Saves a sticker so you can use it later. Use this if you liked a sticker someone sent.")
                 .requiredInteger("sticker_id", "Id of the sticker to save")
                 .build(arguments -> {
-                    long stickerId = arguments.path("sticker_id").asLong();
+                    long stickerId = ru.rainedev.raine.core.Numbers.longAt(arguments, "sticker_id", 0);
                     if (stickerId == 0) {
                         return "Provide the sticker_id you want to save.";
                     }
-                    int file = telegram.stickerFile(stickerId);
-                    if (file == 0) {
+                    java.util.Optional<Telegram.StickerRef> sticker = telegram.sticker(stickerId);
+                    if (sticker.isEmpty()) {
                         return "You have not seen that sticker. Use sticker_list, or save one you were sent.";
                     }
-                    actions.saveSticker(file);
+                    actions.saveSticker(sticker.get());
                     log.info("Стикер {} сохранён", stickerId);
                     // сохранить молча — странно: человек в такой момент говорит «о, забрала себе»
                     return "Sticker saved. Tell them you liked it and kept it.";
@@ -87,18 +94,29 @@ public final class StickerTools {
         return Tool.named("sticker_send")
                 .describedAs("Sends one of your saved stickers. Call sticker_list first to see what you have.")
                 .requiredInteger("sticker_id", "Id of the sticker to send")
+                .optionalString("reply_to_message_id",
+                        "Optional. Quote a specific message — a sticker in reply to something said earlier.")
                 .build(arguments -> {
-                    long stickerId = arguments.path("sticker_id").asLong();
+                    // круг общения проверяется и здесь: открыть чат — одно,
+                    // а отправить в него — другое, и запрет должен работать в обоих
+                    if (!allowed.test(chatId)) {
+                        log.info("Стикер в чат {} вне круга общения не отправлен", chatId);
+                        return "You cannot send anything to that chat.";
+                    }
+                    long stickerId = ru.rainedev.raine.core.Numbers.longAt(arguments, "sticker_id", 0);
                     boolean known = telegram.savedStickers(LIMIT).stream().anyMatch(s -> s.id == stickerId);
                     if (!known) {
                         return "You don't have this sticker. Call sticker_list to see your stickers.";
                     }
-                    int file = telegram.stickerFile(stickerId);
-                    if (file == 0) {
+                    java.util.Optional<Telegram.StickerRef> sticker = telegram.sticker(stickerId);
+                    if (sticker.isEmpty()) {
                         return "Cannot send that sticker. Call sticker_list first.";
                     }
+                    Long replyTo = ru.rainedev.raine.core.Numbers.longAt(arguments, "reply_to_message_id")
+                            .filter(id -> telegram.message(chatId, id).isPresent())
+                            .orElse(null);
                     actions.typing(chatId);
-                    actions.sendSticker(chatId, file, null);
+                    actions.sendSticker(chatId, sticker.get(), replyTo);
                     log.info("Стикер {} отправлен в чат {}", stickerId, chatId);
                     return "Sticker sent.";
                 });

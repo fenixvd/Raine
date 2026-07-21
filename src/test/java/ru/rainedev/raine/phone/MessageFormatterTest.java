@@ -179,7 +179,9 @@ class MessageFormatterTest {
         TdApi.MessageCall call = new TdApi.MessageCall();
         call.discardReason = new TdApi.CallDiscardReasonMissed();
         message.content = call;
-        assertTrue(formatter.format(message, view).contains("[пропущенный звонок]"));
+        String missedCall = formatter.format(message, view);
+        assertTrue(missedCall.contains("<call"), missedCall);
+        assertTrue(missedCall.contains("missed"), missedCall);
 
         message.content = new TdApi.MessageScreenshotTaken();
         assertTrue(formatter.format(message, view).contains("скриншот"));

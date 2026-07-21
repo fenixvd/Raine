@@ -57,7 +57,8 @@ public final class NotificationLoop {
     /** Ход закончился — она отложила телефон. */
     private Runnable onIdle = () -> { };
 
-    private java.util.function.Consumer<Notification> onNotificationDone = notification -> { };
+    /** Что сделать, когда ход закончен. Слушателей несколько: закрыть чаты, снять признак порыва. */
+    private final List<java.util.function.Consumer<Notification>> onNotificationDone = new ArrayList<>();
 
     @FunctionalInterface
     public interface SystemPrompt {
@@ -88,7 +89,7 @@ public final class NotificationLoop {
     }
 
     public void onNotificationDone(java.util.function.Consumer<Notification> action) {
-        this.onNotificationDone = action;
+        this.onNotificationDone.add(action);
     }
 
     public void submit(Notification notification) {
@@ -124,12 +125,15 @@ public final class NotificationLoop {
                 }
                 Notification notification = queue.take();
                 process(notification);
-                onNotificationDone.accept(notification);
+                notifyDone(notification);
                 onIdle.run();
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 return;
             } catch (RuntimeException e) {
+                if (Fatal.check(e)) {
+                    return;
+                }
                 log.error("Не удалось обработать уведомление", e);
                 recoverFrom(e);
             }
@@ -138,6 +142,8 @@ public final class NotificationLoop {
 
     /** Обработка одного уведомления целиком — до wait/pause. */
     public void process(Notification notification) {
+        long startedAt = System.currentTimeMillis();
+        long spentTokens = 0;
         String text = openImmediately(notification).orElse(notification.text());
         context.add(Message.user(text + "\nCurrent time: " + Instant.now() + " UTC"));
 
@@ -155,6 +161,7 @@ public final class NotificationLoop {
                 appendToLast(ASK_REMINDER);
             }
             ChatResponse response = llm.chat(systemPrompt.text(), context, tools.asJson());
+            spentTokens = Math.max(spentTokens, response.totalTokens());
             List<ToolCall> calls = response.toolCalls();
 
             // мысли и намерения — то, ради чего вообще стоит смотреть в лог
@@ -200,6 +207,7 @@ public final class NotificationLoop {
             }
 
             if (calls.stream().anyMatch(call -> Toolbox.FINISHING.contains(call.name()))) {
+                reportCost(startedAt, spentTokens, step + 1);
                 if (response.totalTokens() >= contextTokenLimit) {
                     onContextOverflow.run();
                 }
@@ -212,7 +220,28 @@ public final class NotificationLoop {
             }
         }
 
+        reportCost(startedAt, spentTokens, MAX_STEPS_PER_NOTIFICATION);
         log.warn("Достигнут предел шагов — прекращаем ход принудительно");
+    }
+
+    /**
+     * Во что обошёлся один разговор. Без этой строки понять, сколько стоит
+     * ответить человеку, можно только по счёту у поставщика в конце месяца.
+     */
+    private static void reportCost(long startedAt, long tokens, int steps) {
+        log.info("Ход закончен: {} c, шагов {}, контекст вырос до {} токенов",
+                (System.currentTimeMillis() - startedAt) / 1000, steps, tokens);
+    }
+
+    private void notifyDone(Notification notification) {
+        for (var listener : onNotificationDone) {
+            try {
+                listener.accept(notification);
+            } catch (RuntimeException e) {
+                // уборка после хода не должна ронять цикл
+                log.warn("Не удалось завершить ход: {}", e.getMessage());
+            }
+        }
     }
 
     private void appendToLast(String addition) {

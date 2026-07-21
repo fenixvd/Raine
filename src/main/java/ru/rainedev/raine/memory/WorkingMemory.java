@@ -72,6 +72,17 @@ public final class WorkingMemory {
                 </things_to_remember>
                 <instructions>
                 Your behaviour must be highly influenced by "physical state" and "emotional state" mentioned above.
+
+                <example>
+                Emotional state: anger
+                ...
+                send_telegram_message("text":"иди нахуй заебал")
+                </example>
+                <example>
+                Emotional state: amused
+                ...
+                send_telegram_message("text":"мррр~")
+                </example>
                 </instructions>
                 """.formatted(remembered);
     }

@@ -73,6 +73,11 @@ public final class VoiceGenerator {
         body.put("voice", config.voice());
         body.put("input", text);
         body.put("response_format", "pcm");
+        // язык называется явно: иначе синтез угадывает его по тексту и на
+        // коротких репликах вроде «ага» может заговорить по-английски
+        if (config.language() != null && !config.language().isBlank()) {
+            body.put("language", config.language());
+        }
         body.put("speed", config.speed());
 
         try {

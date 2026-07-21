@@ -102,6 +102,17 @@ class DiaryMemoryTest {
     }
 
     @Test
+    void thresholdNeverFallsBelowTheFloor(@TempDir Path dir) {
+        // без нижней границы разрозненный дневник утягивает планку в ноль,
+        // и в разговор начинает лезть что попало
+        Diary diary = diaryWith(dir, "совсем про другое");
+        DiaryMemory memory = new DiaryMemory(diary, new FixedEmbedding(new double[] {-1, 0, 0}), 4000, 0.8);
+
+        assertTrue(memory.recall(context("вопрос")).isEmpty());
+        assertTrue(memory.threshold() >= 0.8, "порог просел ниже границы: " + memory.threshold());
+    }
+
+    @Test
     void emptyDiaryRecallsNothing(@TempDir Path dir) {
         Memory memory = new DiaryMemory(new Diary(dir), new FixedEmbedding(new double[] {1, 0, 0}), 4000);
 

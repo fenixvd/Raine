@@ -47,12 +47,17 @@ public final class SleepConsolidation {
 
     private final Diary diary;
     private final LlmClient llm;
-    private final String prompt;
+    private final java.util.function.Supplier<String> prompt;
     private final Path archive;
     private final int maxBodyLength;
     private final RandomGenerator random;
 
     public SleepConsolidation(Diary diary, LlmClient llm, String prompt, Path archive,
+                              int maxBodyLength, RandomGenerator random) {
+        this(diary, llm, () -> prompt, archive, maxBodyLength, random);
+    }
+
+    public SleepConsolidation(Diary diary, LlmClient llm, java.util.function.Supplier<String> prompt, Path archive,
                               int maxBodyLength, RandomGenerator random) {
         this.diary = diary;
         this.llm = llm;
@@ -78,8 +83,26 @@ public final class SleepConsolidation {
 
         Instant deadline = Instant.now().plus(budget);
         int reviewed = 0;
+        int reviewedThisRound = 0;
 
-        while (!pending.isEmpty() && Instant.now().isBefore(deadline) && !wokeUp.getAsBoolean()) {
+        while (Instant.now().isBefore(deadline) && !wokeUp.getAsBoolean()) {
+            if (pending.isEmpty()) {
+                // дневник пройден весь, а ночь ещё не кончилась — заходим на второй
+                // круг: за долгую ночь память пересматривается глубже, за короткую
+                // не успевает и первого. Круг, не изменивший ничего, — последний:
+                // дальше повторять нечего, и остаток ночи проходит спокойно
+                if (reviewed > 0 && reviewedThisRound == 0) {
+                    break;
+                }
+                reviewedThisRound = 0;
+                diary.reload();
+                pending.addAll(diary.query(new double[0]).stream().map(Diary.Match::entry).toList());
+                pending.sort((a, b) -> b.id().compareTo(a.id()));
+                if (pending.size() <= 1) {
+                    break;   // сводить нечего
+                }
+                log.info("Дневник пройден целиком, начинаю заново");
+            }
             DiaryEntry target = take(pending);
             List<DiaryEntry> group = gather(target, pending);
 
@@ -90,6 +113,7 @@ public final class SleepConsolidation {
             int saved = store(rewritten);
             retire(group);
             reviewed += group.size();
+            reviewedThisRound += group.size();
             log.info("Во сне пересмотрено {} записей, на их месте {}", group.size(), saved);
         }
 
@@ -137,7 +161,7 @@ public final class SleepConsolidation {
 
         for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
             try {
-                String answer = llm.chat(prompt, List.of(Message.user(body.toString())), null).text();
+                String answer = llm.chat(prompt.get(), List.of(Message.user(body.toString())), null).text();
                 if (answer != null && !answer.isBlank() && !ModelText.looksLikeToolCall(answer)) {
                     return answer;
                 }

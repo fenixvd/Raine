@@ -27,12 +27,24 @@ public final class DiaryMemory implements Memory {
     private final LlmClient llm;
     private final int maxLength;
 
+    /**
+     * Ниже этой близости запись не вспоминается, как бы ни просел плавающий
+     * порог. Без нижней границы пустой или разрозненный дневник утягивает
+     * планку в ноль, и в разговор начинает лезть что попало.
+     */
+    private final double floor;
+
     private double threshold = 0.5;
 
     public DiaryMemory(Diary diary, LlmClient llm, int maxLength) {
+        this(diary, llm, maxLength, 0.0);
+    }
+
+    public DiaryMemory(Diary diary, LlmClient llm, int maxLength, double floor) {
         this.diary = diary;
         this.llm = llm;
         this.maxLength = maxLength;
+        this.floor = floor;
     }
 
     public double threshold() {
@@ -56,17 +68,17 @@ public final class DiaryMemory implements Memory {
 
         StringBuilder recalled = new StringBuilder();
         for (Diary.Match match : diary.query(vector)) {
-            if (match.relatedness() < threshold) {
+            if (match.relatedness() < Math.max(floor, threshold)) {
                 if (recalled.isEmpty()) {
                     // ничего не проходит — планка завышена, опускаем её к тому, что реально есть
-                    threshold = 0.05 + 0.9 * match.relatedness();
+                    threshold = Math.max(floor, 0.05 + 0.9 * match.relatedness());
                     log.debug("Ничего не вспомнилось, порог снижен до {}", threshold);
                 }
                 break;
             }
             if (recalled.length() >= maxLength) {
                 // набралось с избытком — впредь спрашиваем строже
-                threshold = match.relatedness();
+                threshold = Math.max(floor, match.relatedness());
                 break;
             }
             if (alreadyInContext(recentContext, match.entry().body())) {

@@ -16,9 +16,32 @@ public record ChatResponse(String id, String model, List<Choice> choices, Usage 
     public record Usage(
             @JsonProperty("prompt_tokens") long promptTokens,
             @JsonProperty("completion_tokens") long completionTokens,
-            @JsonProperty("total_tokens") long totalTokens) {
+            @JsonProperty("total_tokens") long totalTokens,
+            @JsonProperty("prompt_tokens_details") PromptDetails promptDetails) {
 
-        public static final Usage EMPTY = new Usage(0, 0, 0);
+        public static final Usage EMPTY = new Usage(0, 0, 0, null);
+
+        public Usage(long promptTokens, long completionTokens, long totalTokens) {
+            this(promptTokens, completionTokens, totalTokens, null);
+        }
+    }
+
+    /**
+     * Подробности про подсказку. Интересно ровно одно: попала ли она в кэш.
+     * Если посредник перестал кэшировать, каждый шаг оплачивается как первый,
+     * и заметить это иначе можно только по счёту в конце месяца.
+     */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record PromptDetails(
+            @JsonProperty("cached_tokens") long cachedTokens,
+            @JsonProperty("cache_write_tokens") Long cacheWriteTokens) {}
+
+    /** @return true, если посредник прямо сообщил, что в кэш ничего не записал */
+    public boolean cacheLooksBroken() {
+        return usage != null && usage.promptDetails() != null
+                && usage.promptDetails().cacheWriteTokens() != null
+                && usage.promptDetails().cacheWriteTokens() == 0
+                && usage.promptDetails().cachedTokens() == 0;
     }
 
     public Optional<Message> firstMessage() {

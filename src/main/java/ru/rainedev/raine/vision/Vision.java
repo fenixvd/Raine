@@ -32,8 +32,8 @@ public final class Vision {
         STICKER("sticker", "sticker_to_text.md", true),
         /** Аватарка — понять, с кем говоришь. */
         AVATAR("chat_photo", "photo_to_text.md", true),
-        /** Лента кадров из видео: несколько моментов подряд на одной картинке. */
-        VIDEO("video", "photo_to_text.md", true);
+        /** Один кадр видео: подпись короткая, кадров много. */
+        VIDEO("video", "video_frame_to_text.md", true);
 
         private final String tag;
         private final String prompt;
@@ -64,18 +64,68 @@ public final class Vision {
     }
 
     /**
-     * Описывает уже готовые байты картинки — например, склеенную ленту кадров.
-     * Кэша здесь нет: у ленты нет файла, по которому её можно узнать.
+     * Описывает уже готовые байты картинки. Кэша здесь нет: у таких байтов
+     * нет файла, по которому их можно было бы узнать в следующий раз.
      */
     public String describe(byte[] image, Kind kind, List<Message> context) {
         try {
             String description = llm.describeImage(kind.cheap ? cheapModel : mainModel,
-                    prompts.load(kind.prompt), buildContext(context), image);
+                    prompts.load(kind.prompt), buildContext(context), Downscale.toFit(image));
             return description == null || description.isBlank() ? "" : wrap(kind, description.strip());
         } catch (RuntimeException e) {
             log.warn("Не удалось разглядеть кадры: {}", e.getMessage());
             return "";
         }
+    }
+
+    /**
+     * Видео описывается покадрово, и каждая подпись помечена своим временем.
+     * Склеить кадры в одну картинку было бы дешевле, но тогда пропадает
+     * главное: что было раньше, а что позже. «Сначала показывает кота, потом
+     * роняет чашку» — это уже рассказ, а не набор картинок.
+     *
+     * @return размеченная лента подписей или пустая строка
+     */
+    public String describeVideo(List<VideoFrames.Frame> frames, List<Message> context) {
+        if (frames.isEmpty()) {
+            return "";
+        }
+        String prompt = prompts.load(Kind.VIDEO.prompt);
+        String situation = buildContext(context);
+        StringBuilder timeline = new StringBuilder();
+        for (VideoFrames.Frame frame : frames) {
+            String caption = captionOf(frame, prompt, situation);
+            if (caption.isEmpty()) {
+                continue;
+            }
+            timeline.append("<f from=\"").append(VideoFrames.timestamp(frame.from()))
+                    .append("\" to=\"").append(VideoFrames.timestamp(frame.to())).append("\">\n")
+                    .append(caption).append("\n</f>\n");
+        }
+        if (timeline.isEmpty()) {
+            return "";
+        }
+        log.info("Просмотрено кадров: {}", frames.size());
+        return "<video transcription>\n" + timeline
+                + "</video transcription instructions=\"You finished watching this video and should "
+                + "acknowledge its contents shown above.\">\n";
+    }
+
+    private String captionOf(VideoFrames.Frame frame, String prompt, String situation) {
+        for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+            try {
+                String caption = llm.describeImage(cheapModel, prompt, situation, Downscale.toFit(frame.jpeg()));
+                if (caption != null && !caption.isBlank()) {
+                    return caption.strip();
+                }
+                // пустой ответ обычно значит, что модель захлебнулась рассуждениями
+                log.debug("Пустая подпись к кадру на {} с, попытка {}", frame.from(), attempt);
+            } catch (RuntimeException e) {
+                log.warn("Кадр на {} с не разглядеть: {}", frame.from(), e.getMessage());
+                return "";
+            }
+        }
+        return "";
     }
 
     /**
@@ -100,7 +150,8 @@ public final class Vision {
         String model = kind.cheap ? cheapModel : mainModel;
         for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
             try {
-                String description = llm.describeImage(model, prompts.load(kind.prompt), buildContext(context), image);
+                String description = llm.describeImage(model, prompts.load(kind.prompt), buildContext(context),
+                        Downscale.toFit(image));
                 if (description != null && !description.isBlank()) {
                     toCache(file, description.strip());
                     log.info("Разглядела {}: {}", kind.tag, description.strip().lines().findFirst().orElse(""));

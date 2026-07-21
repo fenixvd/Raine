@@ -32,6 +32,11 @@ public record Message(
         return new Message(Role.USER, content, null, null, null);
     }
 
+    /** Её собственная реплика — нужна, когда разговор с моделью идёт в несколько ходов. */
+    public static Message assistant(String content) {
+        return new Message(Role.ASSISTANT, content, null, null, null);
+    }
+
     /** Ответ инструмента — модель связывает его с вызовом по toolCallId. */
     public static Message toolResult(String toolCallId, String content) {
         return new Message(Role.TOOL, content, null, toolCallId, null);

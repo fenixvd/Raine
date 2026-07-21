@@ -45,6 +45,10 @@ public final class Spontaneity implements AutoCloseable {
     private final Toolbox tools;
     private final RandomGenerator random;
 
+    /** Порыв, который сейчас в очереди или в работе. */
+    private final java.util.concurrent.atomic.AtomicReference<Notification> pending =
+            new java.util.concurrent.atomic.AtomicReference<>();
+
     /** Пока порыв обрабатывается, список чатов показывается иначе. */
     private final java.util.concurrent.atomic.AtomicBoolean acting =
             new java.util.concurrent.atomic.AtomicBoolean();
@@ -61,6 +65,13 @@ public final class Spontaneity implements AutoCloseable {
     }
 
     public void start() {
+        // признак снимается, когда порыв дошёл до обработки и завершился
+        loop.onNotificationDone(done -> {
+            if (done == pending.get()) {
+                pending.set(null);
+                acting.set(false);
+            }
+        });
         scheduler.scheduleAtFixedRate(this::maybeAct,
                 INTERVAL.toMinutes(), INTERVAL.toMinutes(), TimeUnit.MINUTES);
         log.info("Спонтанность включена: проверка раз в {} минут", INTERVAL.toMinutes());
@@ -74,13 +85,8 @@ public final class Spontaneity implements AutoCloseable {
             log.info("Захотелось написать самой");
             acting.set(true);
             Notification impulse = new Notification(buildPrompt(), tools);
+            pending.set(impulse);
             loop.submit(impulse);
-            // признак снимается, когда порыв дошёл до обработки и завершился
-            loop.onNotificationDone(done -> {
-                if (done == impulse) {
-                    acting.set(false);
-                }
-            });
         } catch (RuntimeException e) {
             log.error("Не удалось создать спонтанный порыв", e);
         }
@@ -101,7 +107,9 @@ public final class Spontaneity implements AutoCloseable {
         if (all.isEmpty()) {
             return java.util.Optional.empty();
         }
-        return java.util.Optional.of(all.get(random.nextInt(all.size())).entry());
+        // запись забирается из выдачи: иначе порыв за порывом крутился бы
+        // вокруг одного и того же воспоминания
+        return java.util.Optional.of(diary.take(all.get(random.nextInt(all.size()))));
     }
 
     @Override

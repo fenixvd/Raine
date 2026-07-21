@@ -83,6 +83,9 @@ public final class ImageGenerator {
     /** Длиннее — облик персонажа начинает плыть. */
     private static final int MAX_PROMPT_WORDS = 60;
 
+    /** Столько раз просим модель укоротить задание, прежде чем обрезать самим. */
+    private static final int SHORTEN_ATTEMPTS = 2;
+
     private static final String BASE_NEGATIVE = "(text:2), (signature:2), watermark, deformed hands, extra fingers";
 
     private final HordeClient horde;
@@ -154,6 +157,7 @@ public final class ImageGenerator {
         String appearance = prompts.load("character_appearance.md");
         Prompt prompt = engineer(wish, appearance, "", null);
         String feedbackSoFar = "";
+        String firstFeedback = "";
 
         // изредка задание переписывается с нуля: если правки завели не туда,
         // выбраться из этого места удобнее заново
@@ -179,12 +183,18 @@ public final class ImageGenerator {
                 return save(image);
             }
             log.info("Снимок забракован: {}", verdict);
+            if (firstFeedback.isEmpty()) {
+                // в сообщении о неудаче приводится первый отзыв: он ближе
+                // к исходному пожеланию и понятнее говорит, что не так
+                firstFeedback = verdict;
+            }
             feedbackSoFar = verdict;
             prompt = trial % restartEvery == 0
                     ? engineer(wish, appearance, "", null)
                     : engineer(wish, appearance, feedbackSoFar, prompt);
         }
-        throw new IllegalStateException("Не вышло сделать удачный снимок: " + feedbackSoFar);
+        throw new IllegalStateException("Не вышло сделать удачный снимок: " + firstFeedback
+                + ". Попробуй описать снимок короче.");
     }
 
     private Prompt engineer(String wish, String appearance, String feedback, Prompt previous) {
@@ -206,16 +216,25 @@ public final class ImageGenerator {
             request.append("\n\nPrevious attempt was rejected: ").append(feedback);
         }
 
-        String answer;
-        try {
-            answer = llm.chat(ENGINEER_PROMPT, List.of(Message.user(request.toString())), null).text();
-        } catch (RuntimeException e) {
-            log.warn("Промпт не составился, беру пожелание как есть: {}", e.getMessage());
-            answer = "";
-        }
+        List<Message> conversation = new java.util.ArrayList<>(List.of(Message.user(request.toString())));
+        String answer = ask(conversation);
 
-        String positive = tidy(line(answer, "POSITIVE:", toned));
-        String negative = tidy(line(answer, "NEGATIVE:", ""));
+        String positive = line(answer, "POSITIVE:", toned);
+        String negative = line(answer, "NEGATIVE:", "");
+
+        // слишком длинное задание не обрезаем на полуслове, а просим переписать:
+        // машинная обрезка отсекает половину смысла и оставляет висящую скобку
+        for (int attempt = 1; attempt <= SHORTEN_ATTEMPTS && !fitsInWords(positive, negative); attempt++) {
+            log.info("Задание длинновато, прошу укоротить (попытка {})", attempt);
+            conversation.add(Message.assistant(answer));
+            conversation.add(Message.user("The prompt is too long. Shorten it to 50 words or less: restructure "
+                    + "or adjust (weights:1.5) instead of piling up words. Keep the same format."));
+            answer = ask(conversation);
+            positive = line(answer, "POSITIVE:", positive);
+            negative = line(answer, "NEGATIVE:", negative);
+        }
+        positive = tidy(positive);
+        negative = tidy(negative);
 
         for (String word : BLUNT_WORDS) {
             if (wish.toLowerCase().contains(word)) {
@@ -223,6 +242,24 @@ public final class ImageGenerator {
             }
         }
         return new Prompt(positive, join(BASE_NEGATIVE, negative, HARD_NEGATIVE));
+    }
+
+    private String ask(List<Message> conversation) {
+        try {
+            String answer = llm.chat(ENGINEER_PROMPT, conversation, null).text();
+            return answer == null ? "" : answer;
+        } catch (RuntimeException e) {
+            log.warn("Промпт не составился, беру пожелание как есть: {}", e.getMessage());
+            return "";
+        }
+    }
+
+    private static boolean fitsInWords(String positive, String negative) {
+        return words(positive) <= MAX_PROMPT_WORDS && words(negative) <= MAX_PROMPT_WORDS;
+    }
+
+    private static int words(String prompt) {
+        return prompt.isBlank() ? 0 : prompt.strip().split("\\s+").length;
     }
 
     /** @return пусто, если снимок годится, иначе — что не так */
