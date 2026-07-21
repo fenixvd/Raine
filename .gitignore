@@ -1,0 +1,12 @@
+.gradle/
+build/
+*.class
+
+session/
+config.properties
+
+.idea/
+*.iml
+.vscode/
+logs/
+data/
