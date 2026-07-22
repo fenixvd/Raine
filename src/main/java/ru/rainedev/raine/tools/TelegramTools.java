@@ -576,6 +576,15 @@ public final class TelegramTools {
                         return "Provide an emoji to react with.";
                     }
 
+                    // сначала — есть ли вообще такое сообщение. Промах по номеру
+                    // выглядел как «здесь нельзя реагировать», она делала вывод,
+                    // что реакции сломаны, и неделями сообщала об этом как о баге
+                    if (telegram.message(chatId, messageId).isEmpty()) {
+                        log.info("Реакция не поставлена: сообщения {} нет в чате {}", messageId, chatId);
+                        return "There is no message with id " + messageId + " in this chat. Look at the "
+                                + "message_id values you actually see here and pick one of those.";
+                    }
+
                     // берём ту форму эмодзи, которую называет сам Telegram: у одних
                     // реакций есть невидимый вариационный селектор, у других нет,
                     // и набор отличается от чата к чату
@@ -585,14 +594,16 @@ public final class TelegramTools {
                             .findFirst()
                             .orElse(null);
 
+                    // пустой список — не запрет: Telegram отдаёт набор не всегда
+                    // и не сразу, а в личной переписке реакции есть всегда.
+                    // Раньше на это отвечали отказом, и «реакции не работают»
+                    // тянулось неделями
+                    if (exact == null && available.isEmpty()) {
+                        log.info("Набор реакций для сообщения {} пуст — пробую поставить {} как есть",
+                                messageId, wanted);
+                        exact = wanted;
+                    }
                     if (exact == null) {
-                        if (available.isEmpty()) {
-                            // важно сказать, что это не поломка: иначе она решит,
-                            // что инструмент сломан, и перестанет им пользоваться
-                            log.info("В чате {} реакции отключены — сообщение {} без реакции", chatId, messageId);
-                            return "Reactions are disabled for this message — you can't react here. "
-                                    + "Just skip it, this is not an error.";
-                        }
                         // без этой строки «реакции иногда не работают» не расследовать:
                         // отказ уходит модели, а в журнале не остаётся ничего
                         log.info("Реакция {} недоступна для сообщения {}; здесь можно: {}",
@@ -607,8 +618,14 @@ public final class TelegramTools {
                         // отдельные сообщения не принимают реакции по своим причинам.
                         // Важно, чтобы она не решила, что инструмент сломан вообще
                         log.info("Реакция на сообщение {} не прошла: {}", messageId, e.getMessage());
-                        return "Couldn't react to this message. It happens with some messages — just skip it, "
-                                + "this is not a real error.";
+                        String reason = e.getMessage() == null ? "" : e.getMessage().toUpperCase();
+                        if (reason.contains("REACTION")) {
+                            // здесь их и правда нельзя — но узнали мы это только сейчас
+                            return "Reactions are switched off in this chat, so nobody can react here. "
+                                    + "Nothing is broken: just skip reacting and carry on.";
+                        }
+                        return "This particular message did not accept the reaction. Happens with some "
+                                + "messages; nothing is broken. Skip it and carry on.";
                     }
                     log.info("Реакция {} на сообщение {}", exact, messageId);
                     return "Reaction " + exact + " added.";

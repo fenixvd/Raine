@@ -21,14 +21,16 @@ import ru.rainedev.raine.prompt.Prompts;
 
 class VisionTest {
 
+    /** Кадры видео смотрятся одновременно, поэтому заглушка тоже должна это переживать. */
     private static final class ScriptedLlm implements LlmClient {
-        private final Deque<String> answers = new ArrayDeque<>();
-        String lastModel = "";
-        String lastContext = "";
-        int looks;
+        private final java.util.Queue<String> answers = new java.util.concurrent.ConcurrentLinkedQueue<>();
+        volatile String lastModel = "";
+        volatile String lastContext = "";
+        private final java.util.concurrent.atomic.AtomicInteger seen =
+                new java.util.concurrent.atomic.AtomicInteger();
 
         ScriptedLlm willSee(String description) {
-            answers.addLast(description);
+            answers.add(description);
             return this;
         }
 
@@ -44,10 +46,11 @@ class VisionTest {
 
         @Override
         public String describeImage(String model, String systemPrompt, String context, byte[] image) {
-            looks++;
+            seen.incrementAndGet();
             lastModel = model;
             lastContext = context;
-            return answers.isEmpty() ? "" : answers.removeFirst();
+            String answer = answers.poll();
+            return answer == null ? "" : answer;
         }
     }
 
@@ -59,7 +62,9 @@ class VisionTest {
 
     private static Path imageFile(Path dir, String name) throws IOException {
         Path file = dir.resolve(name);
-        Files.write(file, new byte[] {1, 2, 3});
+        // размером с настоящий файл: слишком мелкие мы не смотрим, потому что
+        // это признак недокачанного вложения
+        Files.write(file, new byte[2048]);
         return file;
     }
 
@@ -74,11 +79,27 @@ class VisionTest {
                         new VideoFrames.Frame(1, 2, new byte[] {2})),
                 List.of());
 
-        assertEquals(2, llm.looks, "каждый кадр описывается отдельно");
+        assertEquals(2, llm.seen.get(), "каждый кадр описывается отдельно");
         assertTrue(result.contains("from=\"0:00\" to=\"0:01\""), result);
         assertTrue(result.contains("from=\"0:01\" to=\"0:02\""), result);
         assertTrue(result.contains("кот роняет чашку"), result);
         assertTrue(result.contains("video transcription"), result);
+    }
+
+    @Test
+    void videoIsWatchedOnlyOnce(@TempDir Path dir) throws IOException {
+        // разбор ролика — это шестнадцать обращений к зрению плюс расшифровка звука;
+        // повторять их при каждом открытии чата непозволительно дорого
+        ScriptedLlm llm = new ScriptedLlm().willSee("кот сидит").willSee("кот сидит");
+        Path video = imageFile(dir, "ролик.mp4");
+        Vision vision = visionWith(llm, dir.resolve("cache"));
+        List<VideoFrames.Frame> frames = List.of(new VideoFrames.Frame(0, 1, new byte[] {1}));
+
+        String first = vision.describeVideo(frames, List.of(), video);
+        String again = vision.describeVideo(frames, List.of(), video);
+
+        assertEquals(first, again);
+        assertEquals(1, llm.seen.get(), "второй раз смотреть незачем — описание уже есть");
     }
 
     @Test
@@ -98,7 +119,7 @@ class VisionTest {
         String result = visionWith(llm, dir.resolve("cache")).describeVideo(List.of(), List.of());
 
         assertEquals("", result);
-        assertEquals(0, llm.looks, "спрашивать не о чем — незачем и платить");
+        assertEquals(0, llm.seen.get(), "спрашивать не о чем — незачем и платить");
     }
 
     @Test
@@ -144,7 +165,7 @@ class VisionTest {
         String second = vision.describe(photo, Vision.Kind.PHOTO, List.of());
 
         assertEquals(first, second);
-        assertEquals(1, llm.looks, "повторный взгляд на ту же картинку стоит денег и времени");
+        assertEquals(1, llm.seen.get(), "повторный взгляд на ту же картинку стоит денег и времени");
     }
 
     @Test
@@ -167,7 +188,7 @@ class VisionTest {
                 imageFile(dir, "photo.jpg"), Vision.Kind.PHOTO, List.of());
 
         assertEquals("", result);
-        assertTrue(llm.looks <= 3, "попыток должно быть немного, было: " + llm.looks);
+        assertTrue(llm.seen.get() <= 3, "попыток должно быть немного, было: " + llm.seen.get());
     }
 
     @Test
@@ -178,7 +199,7 @@ class VisionTest {
                 imageFile(dir, "photo.jpg"), Vision.Kind.PHOTO, List.of());
 
         assertTrue(result.contains("Человек с котом"), result);
-        assertEquals(2, llm.looks);
+        assertEquals(2, llm.seen.get());
     }
 
     @Test
@@ -189,7 +210,7 @@ class VisionTest {
                 .describe(dir.resolve("нет-такого.jpg"), Vision.Kind.PHOTO, List.of());
 
         assertEquals("", result);
-        assertEquals(0, llm.looks);
+        assertEquals(0, llm.seen.get());
     }
 
     @Test

@@ -132,6 +132,7 @@ public final class RaineApp implements AutoCloseable {
                 vision.hearing(hearing);
             }
             telegramMedia = new TelegramMedia(telegram, vision, () -> loop == null ? List.of() : loop.context());
+            telegramMedia.videoInChannels(config.vision().videoInChannels());
             media = telegramMedia;
         } else {
             log.info("Зрение выключено: вложения видны только по типу");

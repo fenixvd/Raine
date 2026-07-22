@@ -58,6 +58,15 @@ public final class Telegram {
         return client;
     }
 
+    /**
+     * Спросить Telegram и дождаться ответа — но не дольше разумного. Молчание
+     * в ответ на один запрос иначе останавливает её целиком: она замирает
+     * посреди хода и не отвечает никому.
+     */
+    private <T extends TdApi.Object> T ask(TdApi.Function<T> request) {
+        return Await.reply(throttled().send(request), request.getClass().getSimpleName());
+    }
+
     public Telegram(SimpleTelegramClient client, String characterName) {
         this.client = client;
         this.characterName = characterName;
@@ -70,7 +79,7 @@ public final class Telegram {
 
     /** Свежие данные: непрочитанное и последнее сообщение меняются постоянно. */
     public TdApi.Chat chat(long chatId) {
-        TdApi.Chat chat = throttled().send(new TdApi.GetChat(chatId)).join();
+        TdApi.Chat chat = ask(new TdApi.GetChat(chatId));
         chatCache.put(chatId, new Cached(chat, System.currentTimeMillis()));
         return chat;
     }
@@ -100,7 +109,7 @@ public final class Telegram {
         }
         return nameCache.computeIfAbsent(id, key -> {
             try {
-                TdApi.User user = throttled().send(new TdApi.GetUser(key)).join();
+                TdApi.User user = ask(new TdApi.GetUser(key));
                 String name = (user.firstName + " " + user.lastName).strip();
                 String username = usernameOf(user);
                 if (!username.isEmpty()) {
@@ -132,9 +141,8 @@ public final class Telegram {
         List<TdApi.Message> collected = new ArrayList<>();
         long fromMessageId = 0;
         while (collected.size() < limit) {
-            TdApi.Messages page = client
-                    .send(new TdApi.GetChatHistory(chatId, fromMessageId, 0, Math.min(50, limit), false))
-                    .join();
+            TdApi.Messages page =
+                    ask(new TdApi.GetChatHistory(chatId, fromMessageId, 0, Math.min(50, limit), false));
             if (page.messages == null || page.messages.length == 0) {
                 break;
             }
@@ -151,7 +159,7 @@ public final class Telegram {
         TdApi.GetChats request = new TdApi.GetChats();
         request.chatList = new TdApi.ChatListMain();
         request.limit = limit;
-        TdApi.Chats chats = throttled().send(request).join();
+        TdApi.Chats chats = ask(request);
         List<TdApi.Chat> result = new ArrayList<>();
         for (long id : chats.chatIds) {
             try {
@@ -172,7 +180,7 @@ public final class Telegram {
             TdApi.LoadChats request = new TdApi.LoadChats();
             request.chatList = new TdApi.ChatListMain();
             request.limit = limit;
-            throttled().send(request).join();
+            ask(request);
         } catch (RuntimeException e) {
             // «больше нечего загружать» — обычный ответ, а не ошибка
             log.debug("Список чатов загружен полностью: {}", e.getMessage());
@@ -208,7 +216,7 @@ public final class Telegram {
             TdApi.SearchContacts request = new TdApi.SearchContacts();
             request.query = bare;
             request.limit = limit;
-            for (long userId : throttled().send(request).join().userIds) {
+            for (long userId : ask(request).userIds) {
                 add(mine, privateChat(userId));
             }
         });
@@ -217,7 +225,7 @@ public final class Telegram {
             TdApi.SearchChatsOnServer request = new TdApi.SearchChatsOnServer();
             request.query = bare;
             request.limit = limit;
-            for (long id : throttled().send(request).join().chatIds) {
+            for (long id : ask(request).chatIds) {
                 add(mine, chat(id));
             }
         });
@@ -226,14 +234,14 @@ public final class Telegram {
             attempt("публичный чат", () -> {
                 TdApi.SearchPublicChat request = new TdApi.SearchPublicChat();
                 request.username = bare;
-                add(elsewhere, throttled().send(request).join());
+                add(elsewhere, ask(request));
             });
         }
 
         attempt("публичный поиск", () -> {
             TdApi.SearchPublicChats publicSearch = new TdApi.SearchPublicChats();
             publicSearch.query = bare;
-            for (long id : throttled().send(publicSearch).join().chatIds) {
+            for (long id : ask(publicSearch).chatIds) {
                 add(elsewhere, chat(id));
             }
         });
@@ -262,7 +270,7 @@ public final class Telegram {
             request.chatId = chatId;
             request.messageId = messageId;
             request.rowSize = 8;
-            TdApi.AvailableReactions available = throttled().send(request).join();
+            TdApi.AvailableReactions available = ask(request);
             collect(emoji, available.topReactions);
             collect(emoji, available.recentReactions);
             collect(emoji, available.popularReactions);
@@ -295,7 +303,7 @@ public final class Telegram {
             request.fileId = fileId;
             request.priority = 16;
             request.synchronous = true;   // ждём готовности, а не подписываемся на обновления
-            TdApi.File file = throttled().send(request).join();
+            TdApi.File file = ask(request);
             if (file.local == null || file.local.path == null || file.local.path.isEmpty()) {
                 return Optional.empty();
             }
@@ -323,7 +331,7 @@ public final class Telegram {
             TdApi.RecognizeSpeech request = new TdApi.RecognizeSpeech();
             request.chatId = chatId;
             request.messageId = messageId;
-            throttled().send(request).join();
+            ask(request);
         } catch (RuntimeException e) {
             log.debug("Распознавание не запустилось: {}", e.getMessage());
             return Optional.empty();
@@ -349,7 +357,7 @@ public final class Telegram {
     public boolean isPremium() {
         if (premium == null) {
             try {
-                premium = throttled().send(new TdApi.GetUser(myId)).join().isPremium;
+                premium = ask(new TdApi.GetUser(myId)).isPremium;
                 if (!premium) {
                     log.info("Премиума нет: голосовые останутся нераспознанными");
                 }
@@ -377,7 +385,7 @@ public final class Telegram {
         try {
             TdApi.Chat chat = chat(chatId);
             if (chat.type instanceof TdApi.ChatTypePrivate priv) {
-                TdApi.UserFullInfo info = throttled().send(new TdApi.GetUserFullInfo(priv.userId)).join();
+                TdApi.UserFullInfo info = ask(new TdApi.GetUserFullInfo(priv.userId));
                 return Optional.ofNullable(info.photo);
             }
             // у групп и каналов полной истории аватарок нет — берём текущую
@@ -399,7 +407,7 @@ public final class Telegram {
     public TdApi.Chat privateChat(long userId) {
         TdApi.CreatePrivateChat request = new TdApi.CreatePrivateChat();
         request.userId = userId;
-        return throttled().send(request).join();
+        return ask(request);
     }
 
     /** Закреплён ли чат — закрепляют то, что важно, и это стоит замечать. */
@@ -433,7 +441,7 @@ public final class Telegram {
     /** Записан ли человек в контакты — от этого зависит, позволено ли с ним говорить. */
     public boolean isContact(long userId) {
         try {
-            return throttled().send(new TdApi.GetUser(userId)).join().isContact;
+            return ask(new TdApi.GetUser(userId)).isContact;
         } catch (RuntimeException e) {
             return false;
         }
@@ -449,7 +457,7 @@ public final class Telegram {
         request.userId = userId;
         request.contact = contact;
         request.sharePhoneNumber = false;   // свой номер не раздаём
-        throttled().send(request).join();
+        ask(request);
 
         nameCache.remove(userId);
     }
@@ -457,9 +465,9 @@ public final class Telegram {
     public List<TdApi.User> contacts(int limit) {
         List<TdApi.User> result = new ArrayList<>();
         try {
-            long[] ids = throttled().send(new TdApi.GetContacts()).join().userIds;
+            long[] ids = ask(new TdApi.GetContacts()).userIds;
             for (int i = 0; i < Math.min(ids.length, limit); i++) {
-                result.add(throttled().send(new TdApi.GetUser(ids[i])).join());
+                result.add(ask(new TdApi.GetUser(ids[i])));
             }
         } catch (RuntimeException e) {
             log.debug("Контакты недоступны: {}", e.getMessage());
@@ -503,7 +511,7 @@ public final class Telegram {
         if (senderId != 0) {
             request.senderId = new TdApi.MessageSenderUser(senderId);
         }
-        TdApi.FoundChatMessages found = throttled().send(request).join();
+        TdApi.FoundChatMessages found = ask(request);
         if (found.messages == null) {
             return new FoundMessages(List.of(), 0);
         }
@@ -537,7 +545,7 @@ public final class Telegram {
             long now = System.currentTimeMillis() / 1000;
             request.minDate = fromDaysAgo > 0 ? (int) (now - fromDaysAgo * 86400) : 0;
             request.maxDate = toDaysAgo > 0 ? (int) (now - toDaysAgo * 86400) : 0;
-            TdApi.FoundMessages found = throttled().send(request).join();
+            TdApi.FoundMessages found = ask(request);
             return found.messages == null
                     ? new FoundMessages(List.of(), 0)
                     : new FoundMessages(List.of(found.messages), found.totalCount);
@@ -555,7 +563,7 @@ public final class Telegram {
         // отрицательное смещение захватывает и то, что было после искомого
         request.offset = -after;
         request.limit = after + 1 + before;
-        TdApi.Messages messages = throttled().send(request).join();
+        TdApi.Messages messages = ask(request);
         List<TdApi.Message> result = messages.messages == null
                 ? new ArrayList<>() : new ArrayList<>(List.of(messages.messages));
         result.sort((a, b) -> Long.compare(a.id, b.id));
@@ -600,13 +608,13 @@ public final class Telegram {
     public List<TdApi.Sticker> savedStickers(int limit) {
         List<TdApi.Sticker> result = new ArrayList<>();
         try {
-            result.addAll(List.of(throttled().send(new TdApi.GetFavoriteStickers()).join().stickers));
+            result.addAll(List.of(ask(new TdApi.GetFavoriteStickers()).stickers));
         } catch (RuntimeException e) {
             log.debug("Избранные стикеры недоступны: {}", e.getMessage());
         }
         try {
             TdApi.GetRecentStickers recent = new TdApi.GetRecentStickers();
-            for (TdApi.Sticker sticker : throttled().send(recent).join().stickers) {
+            for (TdApi.Sticker sticker : ask(recent).stickers) {
                 if (result.stream().noneMatch(known -> known.id == sticker.id)) {
                     result.add(sticker);
                 }
@@ -665,7 +673,7 @@ public final class Telegram {
     public Optional<TdApi.Message> message(long chatId, long messageId) {
         return messageCache.optional(chatId + ":" + messageId, key -> {
             try {
-                return Optional.ofNullable(throttled().send(new TdApi.GetMessage(chatId, messageId)).join());
+                return Optional.ofNullable(ask(new TdApi.GetMessage(chatId, messageId)));
             } catch (RuntimeException e) {
                 return Optional.empty();
             }

@@ -68,6 +68,11 @@ public interface TelegramActions {
         private final Telegram telegram;
         private final Throttle throttle = new Throttle();
 
+        /** Спросить и дождаться ответа, но не бесконечно. */
+        private <T extends TdApi.Object> T ask(TdApi.Function<T> request) {
+            return Await.reply(throttled().send(request), request.getClass().getSimpleName());
+        }
+
         /** Каждое действие тоже считается обращением к Telegram. */
         private SimpleTelegramClient throttled() {
             throttle.allow();
@@ -92,17 +97,17 @@ public interface TelegramActions {
                 replyTo.messageId = replyToMessageId;
                 request.replyTo = replyTo;
             }
-            return throttled().send(request).join().id;
+            return ask(request).id;
         }
 
         @Override
         public void openChat(long chatId) {
-            throttled().send(new TdApi.OpenChat(chatId)).join();
+            ask(new TdApi.OpenChat(chatId));
         }
 
         @Override
         public void closeChat(long chatId) {
-            throttled().send(new TdApi.CloseChat(chatId)).join();
+            ask(new TdApi.CloseChat(chatId));
         }
 
         @Override
@@ -110,12 +115,12 @@ public interface TelegramActions {
             TdApi.SendChatAction action = new TdApi.SendChatAction();
             action.chatId = chatId;
             action.action = new TdApi.ChatActionCancel();
-            throttled().send(action);
+            ask(action);
         }
 
         @Override
         public void markRead(long chatId, long[] messageIds) {
-            throttled().send(new TdApi.ViewMessages(chatId, messageIds, null, false)).join();
+            throttled().send(new TdApi.ViewMessages(chatId, messageIds, null, false));
         }
 
         @Override
@@ -123,7 +128,7 @@ public interface TelegramActions {
             TdApi.SendChatAction action = new TdApi.SendChatAction();
             action.chatId = chatId;
             action.action = new TdApi.ChatActionTyping();
-            throttled().send(action);
+            ask(action);
         }
 
         @Override
@@ -144,7 +149,7 @@ public interface TelegramActions {
             // так реакция попадает в её недавние: набор со временем меняется сам,
             // как у человека
             request.updateRecentReactions = true;
-            throttled().send(request).join();
+            throttled().send(request);
         }
 
         @Override
@@ -157,7 +162,7 @@ public interface TelegramActions {
             // от своего имени
             request.sendCopy = false;
             request.removeCaption = false;
-            throttled().send(request).join();
+            ask(request);
         }
 
         @Override
@@ -166,7 +171,7 @@ public interface TelegramActions {
             request.chatId = chatId;
             request.messageIds = new long[] {messageId};
             request.revoke = true;
-            throttled().send(request).join();
+            ask(request);
         }
 
         @Override
@@ -178,7 +183,7 @@ public interface TelegramActions {
                 request.chatId = chatId;
                 request.messageId = messageId;
                 request.caption = formatted;
-                throttled().send(request).join();
+                ask(request);
                 return;
             }
             TdApi.InputMessageText content = new TdApi.InputMessageText();
@@ -187,7 +192,7 @@ public interface TelegramActions {
             request.chatId = chatId;
             request.messageId = messageId;
             request.inputMessageContent = content;
-            throttled().send(request).join();
+            ask(request);
         }
 
         @Override
@@ -210,7 +215,7 @@ public interface TelegramActions {
                 replyTo.messageId = replyToMessageId;
                 request.replyTo = replyTo;
             }
-            throttled().send(request).join();
+            ask(request);
         }
 
         @Override
@@ -219,7 +224,7 @@ public interface TelegramActions {
             request.sticker = sticker.remoteId().isEmpty()
                     ? new TdApi.InputFileId(sticker.fileId())
                     : new TdApi.InputFileRemote(sticker.remoteId());
-            throttled().send(request).join();
+            ask(request);
         }
 
         @Override
@@ -241,7 +246,7 @@ public interface TelegramActions {
             TdApi.SendMessage request = new TdApi.SendMessage();
             request.chatId = chatId;
             request.inputMessageContent = content;
-            throttled().send(request).join();
+            ask(request);
         }
 
         @Override
@@ -249,7 +254,7 @@ public interface TelegramActions {
             TdApi.SetOption request = new TdApi.SetOption();
             request.name = "online";
             request.value = new TdApi.OptionValueBoolean(online);
-            throttled().send(request);
+            ask(request);
         }
 
         @Override
@@ -269,12 +274,12 @@ public interface TelegramActions {
             TdApi.SendMessage request = new TdApi.SendMessage();
             request.chatId = chatId;
             request.inputMessageContent = content;
-            throttled().send(request).join();
+            throttled().send(request);
         }
 
         @Override
         public void blockAndLeave(long chatId) {
-            TdApi.Chat chat = throttled().send(new TdApi.GetChat(chatId)).join();
+            TdApi.Chat chat = ask(new TdApi.GetChat(chatId));
 
             TdApi.SetMessageSenderBlockList request = new TdApi.SetMessageSenderBlockList();
             // в личке блокируют человека, а не чат: с типом чата запрос проходит,
@@ -283,12 +288,12 @@ public interface TelegramActions {
                     ? new TdApi.MessageSenderUser(priv.userId)
                     : new TdApi.MessageSenderChat(chatId);
             request.blockList = new TdApi.BlockListMain();
-            throttled().send(request).join();
+            ask(request);
 
             // из группы и канала просто уходят
             if (!(chat.type instanceof TdApi.ChatTypePrivate)) {
                 try {
-                    throttled().send(new TdApi.LeaveChat(chatId)).join();
+                    ask(new TdApi.LeaveChat(chatId));
                 } catch (RuntimeException e) {
                     log.debug("Не удалось выйти из чата {}: {}", chatId, e.getMessage());
                 }

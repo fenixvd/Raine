@@ -56,7 +56,8 @@ public record Config(
      *                    разбор десятка картинок стоит минуты молчания, а разговор
      *                    идёт про последние из них
      */
-    public record Vision(boolean enabled, String model, String cheapModel, Path cacheDir, int recentDepth) {}
+    public record Vision(boolean enabled, String model, String cheapModel, Path cacheDir, int recentDepth,
+                         boolean videoInChannels) {}
 
     /**
      * Ночной сон. Время выбирается заново каждую ночь в пределах окна:
@@ -149,7 +150,9 @@ public record Config(
                                 "дешёвая модель зрения: стикеры, аватарки"),
                         s.path("vision_cache_dir", "cache/images", "кэш описаний картинок"),
                         s.integer("vision_recent_messages", 8,
-                                "у скольких последних сообщений разглядывать вложения")),
+                                "у скольких последних сообщений разглядывать вложения"),
+                        s.flag("vision_video_in_channels", false,
+                                "разбирать ли ролики в каналах покадрово; обычно хватает заставки")),
                 new Voice(
                         s.flag("voice_enabled", true, "может ли записывать голосовые"),
                         s.get("voice_base_url", s.require("llm_base_url", "адрес модели"), "адрес синтеза речи"),

@@ -64,12 +64,23 @@ public final class Toolbox {
      * его обрабатывает цикл.
      */
     public List<ru.rainedev.raine.llm.Message> invoke(List<ToolCall> calls) {
+        return invoke(calls, this::add);
+    }
+
+    /**
+     * @param appeared куда складывать инструменты, появившиеся по ходу дела.
+     *                 Набор пересобирается на каждом шаге, поэтому класть их
+     *                 только сюда мало: открытый чат должен оставаться открытым
+     *                 до конца хода, иначе на следующем шаге вернутся инструменты
+     *                 прежнего чата и сообщение уйдёт не туда
+     */
+    public List<ru.rainedev.raine.llm.Message> invoke(List<ToolCall> calls, java.util.function.Consumer<Tool> appeared) {
         // инструменту бывает важно знать, один ли он в этом шаге
         CurrentStep.set(calls);
         try {
             List<ru.rainedev.raine.llm.Message> results = new ArrayList<>();
             for (ToolCall call : calls) {
-                results.add(ru.rainedev.raine.llm.Message.toolResult(call.id(), clean(invokeOne(call))));
+                results.add(ru.rainedev.raine.llm.Message.toolResult(call.id(), clean(invokeOne(call, appeared))));
             }
             return results;
         } finally {
@@ -77,7 +88,7 @@ public final class Toolbox {
         }
     }
 
-    private String invokeOne(ToolCall call) {
+    private String invokeOne(ToolCall call, java.util.function.Consumer<Tool> appeared) {
         Tool tool = tools.get(call.name());
         if (tool == null) {
             return "Инструмент '%s' сейчас недоступен. Доступны: %s".formatted(call.name(), String.join(", ", names()));
@@ -85,7 +96,7 @@ public final class Toolbox {
         try {
             // инструменты, появившиеся по ходу дела, живут в этом же наборе
             // и исчезнут вместе с ним
-            return tool.handler().call(parse(call.arguments()), this::add);
+            return tool.handler().call(parse(call.arguments()), appeared);
         } catch (LowQualityException e) {
             throw e;
         } catch (RuntimeException e) {

@@ -236,7 +236,13 @@ public final class NotificationLoop {
 
             List<Message> results;
             try {
-                results = tools.invoke(calls);
+                // инструменты открытого чата остаются до конца хода, а не до конца
+                // шага: иначе на следующем шаге вернутся инструменты прежнего чата,
+                // и реакция или сообщение уйдут не туда
+                results = tools.invoke(calls, appeared -> {
+                    tools.add(appeared);
+                    notification.tools().add(appeared);
+                });
             } catch (LowQualityException e) {
                 // откат: сообщение модели в контекст не попадает, вместо него — подсказка
                 log.info("Ответ низкого качества, пробуем иначе: {}", e.getMessage());

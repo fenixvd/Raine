@@ -24,6 +24,12 @@ public final class Vision {
     /** Больше — почти всегда зря: модель начинает пересказывать саму себя. */
     private static final int MAX_ATTEMPTS = 3;
 
+    /** Столько кадров смотрится одновременно. Больше — очередь у поставщика. */
+    private static final int FRAMES_AT_ONCE = 6;
+
+    /** Меньше этого — не картинка, а недокачанный файл. */
+    private static final int MIN_IMAGE_BYTES = 512;
+
     /** Что смотрим. От этого зависит и промпт, и какой моделью. */
     public enum Kind {
         /** Присланное фото — важно разглядеть, берём основную модель. */
@@ -101,24 +107,50 @@ public final class Vision {
      * @param file сам файл — из него слышно звук. Без него видео немое
      */
     public String describeVideo(List<VideoFrames.Frame> frames, List<Message> context, java.nio.file.Path file) {
+        // разбор ролика — это шестнадцать обращений к зрению плюс расшифровка
+        // звука; повторять их при каждом открытии чата непозволительно дорого
+        if (file != null) {
+            String remembered = fromCache(file);
+            if (remembered != null) {
+                log.debug("Видео {} уже смотрела", file.getFileName());
+                return remembered;
+            }
+        }
         if (frames.isEmpty()) {
             // картинку разобрать не вышло, но в звуке может быть всё главное
-            return heard(file)
+            String onlySound = heard(file)
                     .map(speech -> "<video transcription>\n<f track=\"audio\">\n" + speech
                             + "\n</f>\n</video transcription>\n")
                     .orElse("");
+            if (!onlySound.isEmpty() && file != null) {
+                toCache(file, onlySound);
+            }
+            return onlySound;
         }
         String prompt = prompts.load(Kind.VIDEO.prompt);
         String situation = buildContext(context);
+
+        // кадры смотрятся одновременно: ответ по каждому идёт полминуты, и по
+        // очереди шестнадцать кадров — это десять минут молчания на один ролик.
+        // Порядок при этом сохраняется, иначе лента времени перестанет быть лентой
+        List<String> captions;
+        try (var pool = java.util.concurrent.Executors.newFixedThreadPool(FRAMES_AT_ONCE,
+                Thread.ofVirtual().name("raine-frame-", 0).factory())) {
+            List<java.util.concurrent.Future<String>> pending = frames.stream()
+                    .map(frame -> pool.submit(() -> captionOf(frame, prompt, situation)))
+                    .toList();
+            captions = pending.stream().map(Vision::quietly).toList();
+        }
+
         StringBuilder timeline = new StringBuilder();
-        for (VideoFrames.Frame frame : frames) {
-            String caption = captionOf(frame, prompt, situation);
-            if (caption.isEmpty()) {
+        for (int i = 0; i < frames.size(); i++) {
+            if (captions.get(i).isEmpty()) {
                 continue;
             }
+            VideoFrames.Frame frame = frames.get(i);
             timeline.append("<f from=\"").append(VideoFrames.timestamp(frame.from()))
                     .append("\" to=\"").append(VideoFrames.timestamp(frame.to())).append("\">\n")
-                    .append(caption).append("\n</f>\n");
+                    .append(captions.get(i)).append("\n</f>\n");
         }
         if (timeline.isEmpty()) {
             return "";
@@ -126,9 +158,13 @@ public final class Vision {
         heard(file).ifPresent(speech ->
                 timeline.append("<f track=\"audio\">\n").append(speech).append("\n</f>\n"));
         log.info("Просмотрено кадров: {}", frames.size());
-        return "<video transcription>\n" + timeline
+        String described = "<video transcription>\n" + timeline
                 + "</video transcription instructions=\"You finished watching this video and should "
                 + "acknowledge its contents shown above.\">\n";
+        if (file != null) {
+            toCache(file, described);
+        }
+        return described;
     }
 
     /**
@@ -153,6 +189,17 @@ public final class Vision {
             } catch (java.io.IOException e) {
                 log.debug("Временная дорожка не удалилась: {}", e.getMessage());
             }
+        }
+    }
+
+    private static String quietly(java.util.concurrent.Future<String> caption) {
+        try {
+            return caption.get();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return "";
+        } catch (java.util.concurrent.ExecutionException e) {
+            return "";
         }
     }
 
@@ -189,6 +236,13 @@ public final class Vision {
             image = Files.readAllBytes(file);
         } catch (IOException e) {
             log.warn("Не удалось прочитать {}: {}", file.getFileName(), e.getMessage());
+            return "";
+        }
+        // пустой файл Telegram отдаёт, когда вложение ещё не скачалось. Модель
+        // на это отвечает «картинки нет», и эта фраза уходит в разговор как
+        // описание — лучше промолчать
+        if (image.length < MIN_IMAGE_BYTES) {
+            log.info("Файл {} пуст ({} байт) — смотреть нечего", file.getFileName(), image.length);
             return "";
         }
 
