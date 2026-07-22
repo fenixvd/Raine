@@ -1,0 +1,217 @@
+# Настройки Raine. Скопируй в config.properties и заполни первые семь строк —
+# остальное имеет разумные значения по умолчанию и дописывается само при первом
+# запуске. Файл читается на ходу: правки применяются без перезапуска.
+#
+# Любое значение перекрывается переменной окружения: RAINE_LLM_MODEL и т.д.
+
+# --- обязательное ---
+
+api_id=0
+api_hash=ваш-ключ-с-my.telegram.org
+phone=+70000000000
+owner_id=0
+llm_base_url=https://example/api/v1/
+llm_model=модель
+llm_api_key=ключ
+
+# --- всё остальное можно не трогать ---
+# где хранится сессия Telegram
+session_dir=session
+
+# папка с промптами
+prompts_dir=prompts
+
+# папка дневника — долгой памяти
+diary_dir=data/diary
+
+# файл средней памяти
+working_memory_file=data/working_memory.md
+
+# сколько букв воспоминаний подмешивать в разговор за раз
+diary_injection_max_length=4000
+
+# выше этой близости новая запись дневника считается повтором старой
+diary_plagiarism_threshold=0.97
+
+# ниже этой близости запись не вспоминается, как бы ни просел плавающий порог
+diary_min_relatedness=0.8
+
+# какого объёма пласт памяти пересматривается во сне за один заход
+diary_token_count_trigger=40000
+
+# видит ли она картинки и видео
+vision_enabled=true
+
+# модель зрения для важного
+vision_model=openai/gpt-4o-mini
+
+# дешёвая модель зрения: стикеры, аватарки
+vision_model_cheap=qwen/qwen3.6-flash
+
+# кэш описаний картинок
+vision_cache_dir=cache/images
+
+# у скольких последних сообщений разглядывать вложения
+vision_recent_messages=8
+
+# разбирать ли ролики в каналах покадрово; обычно хватает заставки
+vision_video_in_channels=false
+
+# может ли записывать голосовые
+voice_enabled=true
+
+# адрес синтеза речи
+voice_base_url=https://example/api/v1/
+
+# ключ синтеза речи
+voice_api_key=ключ
+
+# модель синтеза речи
+voice_model=google/gemini-3.1-flash-tts-preview
+
+# голос
+voice_name=Leda
+
+# язык речи: без него синтез угадывает его по тексту
+voice_language=ru
+
+# скорость речи
+voice_speed=1.2
+
+# частота дискретизации синтеза
+voice_sample_rate=24000
+
+# битрейт голосового сообщения
+voice_bitrate=24000
+
+# куда складывать записанные голосовые
+voice_dir=data/voice_messages
+
+# расшифровывать ли звук из присланных видео
+hearing_enabled=true
+
+# адрес распознавания речи
+hearing_base_url=https://example/api/v1/
+
+# ключ распознавания речи
+hearing_api_key=ключ
+
+# модель распознавания речи
+hearing_model=openai/whisper-1
+
+# язык, на котором говорят в видео
+hearing_language=ru
+
+# может ли делать снимки
+camera_enabled=true
+
+# адрес очереди рисования
+camera_base_url=https://aihorde.net/api/v2/
+
+# ключ очереди рисования
+camera_api_key=
+
+# модели рисования через запятую
+camera_models=WAI-NSFW-illustrious-SDXL,AMPonyXL,AlbedoBase XL (SDXL),Nova Anime XL
+
+# галерея снимков
+camera_gallery=data/gallery
+
+# сколько раз переснимать, пока снимок не удастся
+camera_max_trials=3
+
+# сколько минут ждать своей очереди в сети добровольцев
+camera_queue_minutes=60
+
+# адрес поиска в сети
+web_search_url=https://ollama.com/api/web_search
+
+# ключ поиска в сети; пустой — поиска не будет
+web_search_key=
+
+# температура модели
+llm_temperature=0.2
+
+# модель для векторов памяти
+embedding_model=openai/text-embedding-3-large
+
+# имя
+character_name=Raine
+
+# ник в Telegram
+character_nickname=@raine_tyan
+
+# как она зовёт владельца
+papik_name=RaineDev
+
+# после какого объёма разговор сбрасывается в дневник
+context_token_limit=40000
+
+# круг общения: owner_only, contacts, everyone
+lockdown=owner_only
+
+# читать ли каналы при суженном круге общения
+lockdown_allow_channels=true
+
+# пересматривать ли память во сне
+sleep_consolidation=false
+
+# спит ли она ночью
+night_sleep=true
+
+# не раньше этого времени ложится
+night_bedtime_from=23:00
+
+# не позже этого времени ложится
+night_bedtime_to=01:00
+
+# не раньше этого времени встаёт
+night_wake_from=06:00
+
+# не позже этого времени встаёт
+night_wake_to=09:00
+
+# знает ли она время суток и погоду за окном
+around_enabled=true
+
+# широта места, где она «живёт»
+around_latitude=55.75
+
+# долгота места, где она «живёт»
+around_longitude=37.62
+
+# до скольких секунд тянуть с ответом
+notice_delay_seconds=30
+
+# только смотреть и ничего не отправлять
+read_only=true
+
+# записывать ли каждый запрос к модели и ответ в logs/llm — этим разбирают, почему она ответила именно так
+llm_transcript=true
+
+# сколько букв истории чата показывать при открытии
+chat_max_history_length=2000
+
+# будят ли ночью закреплённые чаты
+wake_up_on_pinned_chat=false
+
+# отлучается ли она изредка среди дня
+randomly_go_sleep=true
+
+# может ли писать первой тем, с кем переписки ещё не было
+can_write_to_a_new_person=false
+
+# пользуется ли стикерами
+use_stickers=true
+
+# как часто напоминать, что переписка — не только текст
+tool_reminder_probability=0.02
+
+# выше этой близости к одной прошлой реплике — повтор
+anti_repeat_trigger_max=0.95
+
+# выше этой средней близости ко всем — хождение по кругу
+anti_repeat_trigger_avg=0.85
+
+# сколько своих реплик держать для сравнения
+anti_repeat_max_history=32
