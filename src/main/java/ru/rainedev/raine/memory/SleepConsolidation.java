@@ -106,6 +106,8 @@ public final class SleepConsolidation {
             DiaryEntry target = take(pending);
             List<DiaryEntry> group = gather(target, pending);
 
+            log.info("Свожу {} записей ({} знаков)", group.size(),
+                    group.stream().mapToInt(entry -> entry.body().length()).sum());
             String rewritten = ask(group);
             if (rewritten.isEmpty()) {
                 continue;

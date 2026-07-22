@@ -125,10 +125,17 @@ public final class Diary {
     public record Match(DiaryEntry entry, double relatedness) {}
 
     /** Все записи по убыванию близости. Порог применяет вызывающий — он у него плавающий. */
+    /**
+     * @param vector пустой — значит спрашивают не «что похоже», а «покажи всё»:
+     *               так перебирают дневник для порыва и для пересмотра во сне.
+     *               Досчитывать векторы в этом случае незачем — сравнивать
+     *               всё равно не с чем, а обращений к сети выходит по числу
+     *               записей
+     */
     public List<Match> query(double[] vector) {
         List<Match> matches = new ArrayList<>(entries.size());
         for (DiaryEntry entry : List.copyOf(entries.values())) {
-            DiaryEntry ready = withEmbedding(entry, vector.length);
+            DiaryEntry ready = vector.length == 0 ? entry : withEmbedding(entry, vector.length);
             // уверенность слегка поднимает запись в выдаче: проверенному верят охотнее
             double relatedness = Similarity.cosine(vector, ready.embedding())
                     + ready.metadata().confidence() * CONFIDENCE_FACTOR;

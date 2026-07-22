@@ -263,7 +263,7 @@ public final class RaineApp implements AutoCloseable {
             var consolidation = new ru.rainedev.raine.memory.SleepConsolidation(
                     diary, llm, prompts.lazy("sleep_consolidator.md"),
                     config.diaryDir().resolve("archive"), config.diaryConsolidationBudget(), random);
-            rest.duringRest(consolidation::run);
+            rest.duringNight(consolidation::run);
             log.info("Пересмотр памяти во сне включён");
         }
 

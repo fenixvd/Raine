@@ -32,8 +32,15 @@ public class Rest {
     /** Дневные отлучки можно выключить: остаётся только ночной сон. */
     private boolean dayNaps = true;
 
-    /** Чем заняться, пока спит. Получает отведённое время и признак пробуждения. */
-    private java.util.function.BiConsumer<Duration, java.util.function.BooleanSupplier> duringRest = (d, w) -> { };
+    /**
+     * Чем заняться ночью. Получает отведённое время и признак пробуждения.
+     * <p>
+     * Именно ночью, а не в любую отлучку: пересмотр памяти необратимо
+     * переписывает накопленное, и запускать его на пятнадцатиминутной
+     * передышке среди дня — значит перекраивать дневник по нескольку раз
+     * в сутки.
+     */
+    private java.util.function.BiConsumer<Duration, java.util.function.BooleanSupplier> duringNight = (d, w) -> { };
 
     /** Уснула или проснулась — по этому меняется статус «в сети». */
     private java.util.function.Consumer<Boolean> onStateChange = resting -> { };
@@ -56,8 +63,8 @@ public class Rest {
         this.night = night;
     }
 
-    public void duringRest(java.util.function.BiConsumer<Duration, java.util.function.BooleanSupplier> action) {
-        this.duringRest = action;
+    public void duringNight(java.util.function.BiConsumer<Duration, java.util.function.BooleanSupplier> action) {
+        this.duringNight = action;
     }
 
     public void onStateChange(java.util.function.Consumer<Boolean> action) {
@@ -89,17 +96,17 @@ public class Rest {
         if (night != null) {
             var untilMorning = night.untilMorning();
             if (untilMorning.isPresent()) {
-                sleep(untilMorning.get(), "до утра");
+                sleep(untilMorning.get(), "до утра", true);
                 return;
             }
         }
         if (!dayNaps || random.nextDouble() >= CHANCE) {
             return;
         }
-        sleep(Duration.ofMinutes(MIN_MINUTES + random.nextInt(MAX_MINUTES - MIN_MINUTES + 1)), "ненадолго");
+        sleep(Duration.ofMinutes(MIN_MINUTES + random.nextInt(MAX_MINUTES - MIN_MINUTES + 1)), "ненадолго", false);
     }
 
-    private void sleep(Duration duration, String reason) {
+    private void sleep(Duration duration, String reason, boolean night) {
         if (duration.isNegative() || duration.isZero()) {
             return;
         }
@@ -114,8 +121,11 @@ public class Rest {
         resting = true;
         onStateChange.accept(true);
         try {
-            // сон — не простой: память в это время пересматривается
-            duringRest.accept(duration, awoken::get);
+            // ночной сон — не простой: память в это время пересматривается.
+            // Дневная передышка на это не годится, она слишком коротка и часта
+            if (night) {
+                duringNight.accept(duration, awoken::get);
+            }
             for (long waited = 0; waited < duration.toSeconds(); waited++) {
                 if (awoken.get()) {
                     log.info("Вернулась раньше — меня позвали");
