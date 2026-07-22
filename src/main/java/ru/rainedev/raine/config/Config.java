@@ -24,6 +24,7 @@ public record Config(
         int diaryConsolidationBudget,
         Vision vision,
         Voice voice,
+        Hearing hearing,
         Camera camera,
         String webSearchUrl,
         String webSearchKey,
@@ -50,7 +51,12 @@ public record Config(
      * Модели зрения. Дешёвая для потокового — стикеры и аватарки, основная
      * для того, что важно разглядеть.
      */
-    public record Vision(boolean enabled, String model, String cheapModel, Path cacheDir) {}
+    /**
+     * @param recentDepth у скольких последних сообщений разглядывать вложения:
+     *                    разбор десятка картинок стоит минуты молчания, а разговор
+     *                    идёт про последние из них
+     */
+    public record Vision(boolean enabled, String model, String cheapModel, Path cacheDir, int recentDepth) {}
 
     /**
      * Ночной сон. Время выбирается заново каждую ночь в пределах окна:
@@ -65,6 +71,12 @@ public record Config(
     /** Синтез речи для голосовых сообщений. */
     public record Voice(boolean enabled, String baseUrl, String apiKey, String model, String voice,
                         String language, double speed, int sampleRate, int bitrate, Path directory) {}
+
+    /**
+     * Слух: расшифровка звуковой дорожки видео. Голосовые и кружки
+     * расшифровывает сам Telegram за премиум, а обычное видео — нет.
+     */
+    public record Hearing(boolean enabled, String baseUrl, String apiKey, String model, String language) {}
 
     /** Генерация снимков. */
     public record Camera(boolean enabled, String baseUrl, String apiKey, java.util.List<String> models,
@@ -99,6 +111,10 @@ public record Config(
 
     private static final Path DEFAULT_FILE = Path.of("config.properties");
 
+    public static Path defaultFile() {
+        return DEFAULT_FILE;
+    }
+
     public static Config load() {
         return load(DEFAULT_FILE);
     }
@@ -127,7 +143,9 @@ public record Config(
                         s.get("vision_model", "openai/gpt-4o-mini", "модель зрения для важного"),
                         s.get("vision_model_cheap", "qwen/qwen3.6-flash",
                                 "дешёвая модель зрения: стикеры, аватарки"),
-                        s.path("vision_cache_dir", "cache/images", "кэш описаний картинок")),
+                        s.path("vision_cache_dir", "cache/images", "кэш описаний картинок"),
+                        s.integer("vision_recent_messages", 8,
+                                "у скольких последних сообщений разглядывать вложения")),
                 new Voice(
                         s.flag("voice_enabled", true, "может ли записывать голосовые"),
                         s.get("voice_base_url", s.require("llm_base_url", "адрес модели"), "адрес синтеза речи"),
@@ -139,6 +157,14 @@ public record Config(
                         s.integer("voice_sample_rate", 24000, "частота дискретизации синтеза"),
                         s.integer("voice_bitrate", 24000, "битрейт голосового сообщения"),
                         s.path("voice_dir", "data/voice_messages", "куда складывать записанные голосовые")),
+                new Hearing(
+                        s.flag("hearing_enabled", true, "расшифровывать ли звук из присланных видео"),
+                        s.get("hearing_base_url", s.require("llm_base_url", "адрес модели"),
+                                "адрес распознавания речи"),
+                        s.get("hearing_api_key", s.require("llm_api_key", "ключ модели"),
+                                "ключ распознавания речи"),
+                        s.get("hearing_model", "openai/whisper-1", "модель распознавания речи"),
+                        s.get("hearing_language", "ru", "язык, на котором говорят в видео")),
                 new Camera(
                         s.flag("camera_enabled", true, "может ли делать снимки"),
                         s.get("camera_base_url", "https://aihorde.net/api/v2/", "адрес очереди рисования"),

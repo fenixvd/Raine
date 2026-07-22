@@ -72,22 +72,32 @@ public final class Diary {
             log.info("Каталог дневника {} пуст — память начинается с нуля", dir);
             return;
         }
+        long startedAt = System.currentTimeMillis();
         try (Stream<Path> files = Files.list(dir)) {
+            // полтысячи файлов по три тысячи чисел в каждом: по одному это
+            // ощутимая пауза на запуске, а разбираются они независимо
+            // порядок в дневнике сохраняется, а разбор идёт вперемешку: каждая
+            // запись читается сама по себе и других не ждёт
             files.filter(path -> path.getFileName().toString().endsWith(".md"))
                     .sorted()
-                    .forEach(this::loadQuietly);
+                    .toList()
+                    .parallelStream()
+                    .map(Diary::readQuietly)
+                    .flatMap(java.util.Optional::stream)
+                    .sorted(java.util.Comparator.comparing(DiaryEntry::id))
+                    .forEachOrdered(entry -> entries.put(entry.id(), entry));
         } catch (IOException e) {
             throw new UncheckedIOException("Не удалось прочитать дневник " + dir, e);
         }
-        log.info("Дневник загружен: {} записей", entries.size());
+        log.info("Дневник загружен: {} записей за {} мс", entries.size(), System.currentTimeMillis() - startedAt);
     }
 
-    private void loadQuietly(Path file) {
+    private static java.util.Optional<DiaryEntry> readQuietly(Path file) {
         try {
-            DiaryEntry entry = parse(file);
-            entries.put(entry.id(), entry);
+            return java.util.Optional.of(parse(file));
         } catch (RuntimeException | IOException e) {
             log.warn("Пропускаю повреждённую запись {}: {}", file.getFileName(), e.getMessage());
+            return java.util.Optional.empty();
         }
     }
 

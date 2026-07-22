@@ -26,7 +26,9 @@ public final class ModelText {
         }
         String result = content.replaceAll("```[a-z]*", "");
         for (String tag : tags) {
-            result = result.replace("<" + tag + ">", "").replace("</" + tag + ">", "");
+            // тег может прийти с довеском: модели любят вписывать в него свою
+            // служебную разметку, и тогда простая замена его не узнаёт
+            result = result.replaceAll("</?[^<>]*" + java.util.regex.Pattern.quote(tag) + "[^<>]*>", "");
         }
         return result.strip();
     }

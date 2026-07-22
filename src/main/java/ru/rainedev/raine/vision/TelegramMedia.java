@@ -76,7 +76,7 @@ public final class TelegramMedia implements MediaDescriber {
      */
     private String watch(Optional<Integer> fileId) {
         return fileId.flatMap(telegram::download)
-                .map(file -> vision.describeVideo(VideoFrames.sample(file), context.get()))
+                .map(file -> vision.describeVideo(VideoFrames.sample(file), context.get(), file))
                 .orElse("");
     }
 

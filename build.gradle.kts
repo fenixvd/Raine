@@ -65,6 +65,9 @@ tasks.named<JavaExec>("run") {
     // авторизация в TDLib идёт через ввод кода из Telegram в консоль
     standardInput = System.`in`
     jvmArgs("--enable-native-access=ALL-UNNAMED")
+    // -Praine.tdlib.verbosity=3 — когда надо увидеть, что приходит с сервера
+    systemProperty("raine.tdlib.verbosity",
+            providers.gradleProperty("raine.tdlib.verbosity").getOrElse("1"))
 }
 
 tasks.named<CreateStartScripts>("startScripts") {

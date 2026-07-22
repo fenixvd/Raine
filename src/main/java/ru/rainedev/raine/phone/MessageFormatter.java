@@ -53,6 +53,10 @@ public final class MessageFormatter {
      */
     public record ChatView(long myId, long lastReadInboxMessageId) {}
 
+    MediaDescriber media() {
+        return media;
+    }
+
     public String format(TdApi.Message message, ChatView view) {
         return format(message, view, "message", false);
     }
@@ -64,6 +68,15 @@ public final class MessageFormatter {
      */
     public String format(TdApi.Message message, ChatView view, boolean isTarget) {
         return format(message, view, "message", isTarget);
+    }
+
+    /**
+     * То же, но без разглядывания вложений: у старых сообщений в истории видно
+     * только их тип. Разобрать десяток картинок стоит минуту, а разговор идёт
+     * про последние из них — за остальными всегда можно вернуться поиском.
+     */
+    public String formatBriefly(TdApi.Message message, ChatView view) {
+        return new MessageFormatter(names, replies, MediaDescriber.NONE).format(message, view);
     }
 
     private String format(TdApi.Message message, ChatView view, String tag) {

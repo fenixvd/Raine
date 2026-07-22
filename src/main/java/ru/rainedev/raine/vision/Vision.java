@@ -53,6 +53,9 @@ public final class Vision {
     private final String cheapModel;
     private final String characterName;
 
+    /** Слух подключается отдельно: без него видео остаётся немым. */
+    private ru.rainedev.raine.speech.SpeechToText hearing;
+
     public Vision(LlmClient llm, Prompts prompts, Path cacheDir,
                   String mainModel, String cheapModel, String characterName) {
         this.llm = llm;
@@ -61,6 +64,10 @@ public final class Vision {
         this.mainModel = mainModel;
         this.cheapModel = cheapModel;
         this.characterName = characterName;
+    }
+
+    public void hearing(ru.rainedev.raine.speech.SpeechToText hearing) {
+        this.hearing = hearing;
     }
 
     /**
@@ -87,8 +94,19 @@ public final class Vision {
      * @return размеченная лента подписей или пустая строка
      */
     public String describeVideo(List<VideoFrames.Frame> frames, List<Message> context) {
+        return describeVideo(frames, context, null);
+    }
+
+    /**
+     * @param file сам файл — из него слышно звук. Без него видео немое
+     */
+    public String describeVideo(List<VideoFrames.Frame> frames, List<Message> context, java.nio.file.Path file) {
         if (frames.isEmpty()) {
-            return "";
+            // картинку разобрать не вышло, но в звуке может быть всё главное
+            return heard(file)
+                    .map(speech -> "<video transcription>\n<f track=\"audio\">\n" + speech
+                            + "\n</f>\n</video transcription>\n")
+                    .orElse("");
         }
         String prompt = prompts.load(Kind.VIDEO.prompt);
         String situation = buildContext(context);
@@ -105,10 +123,37 @@ public final class Vision {
         if (timeline.isEmpty()) {
             return "";
         }
+        heard(file).ifPresent(speech ->
+                timeline.append("<f track=\"audio\">\n").append(speech).append("\n</f>\n"));
         log.info("Просмотрено кадров: {}", frames.size());
         return "<video transcription>\n" + timeline
                 + "</video transcription instructions=\"You finished watching this video and should "
                 + "acknowledge its contents shown above.\">\n";
+    }
+
+    /**
+     * В ролике половина смысла обычно в звуке: без него «человек что-то говорит
+     * в камеру» — это всё, что она узнает.
+     */
+    private java.util.Optional<String> heard(java.nio.file.Path file) {
+        if (file == null || hearing == null || !hearing.isAvailable()) {
+            return java.util.Optional.empty();
+        }
+        java.util.Optional<java.nio.file.Path> audio = VideoAudio.extract(file);
+        if (audio.isEmpty()) {
+            return java.util.Optional.empty();
+        }
+        try {
+            java.util.Optional<String> speech = hearing.listen(audio.get());
+            speech.ifPresent(text -> log.info("Услышано в видео: {}", text));
+            return speech;
+        } finally {
+            try {
+                java.nio.file.Files.deleteIfExists(audio.get());
+            } catch (java.io.IOException e) {
+                log.debug("Временная дорожка не удалилась: {}", e.getMessage());
+            }
+        }
     }
 
     private String captionOf(VideoFrames.Frame frame, String prompt, String situation) {

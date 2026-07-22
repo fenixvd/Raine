@@ -29,9 +29,9 @@ public final class Lockdown {
         }
     }
 
-    private final Mode mode;
+    private volatile Mode mode;
     private final long ownerId;
-    private final boolean allowChannels;
+    private volatile boolean allowChannels;
 
     public Lockdown(Mode mode, long ownerId) {
         this(mode, ownerId, true);
@@ -50,6 +50,15 @@ public final class Lockdown {
 
     public Mode mode() {
         return mode;
+    }
+
+    /** Круг общения меняется на ходу: правка настроек не должна требовать перезапуска. */
+    public void mode(Mode mode) {
+        this.mode = mode;
+    }
+
+    public void allowChannels(boolean allowed) {
+        this.allowChannels = allowed;
     }
 
     public boolean allows(TdApi.Chat chat, boolean isContact) {

@@ -91,7 +91,7 @@ public final class SleepConsolidation {
                 // круг: за долгую ночь память пересматривается глубже, за короткую
                 // не успевает и первого. Круг, не изменивший ничего, — последний:
                 // дальше повторять нечего, и остаток ночи проходит спокойно
-                if (reviewed > 0 && reviewedThisRound == 0) {
+                if (reviewedThisRound == 0) {
                     break;
                 }
                 reviewedThisRound = 0;

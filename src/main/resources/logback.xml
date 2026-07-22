@@ -8,9 +8,13 @@
     <!-- разбирать поведение по консоли неудобно: ход мыслей длинный и уезжает вверх -->
     <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
         <file>logs/raine.log</file>
-        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
-            <fileNamePattern>logs/raine.%d{yyyy-MM-dd}.log</fileNamePattern>
+        <!-- и по дате, и по размеру: зациклившийся код однажды написал сюда
+             гигабайт за вечер, и место кончилось бы раньше, чем это заметили -->
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>logs/raine.%d{yyyy-MM-dd}.%i.log</fileNamePattern>
+            <maxFileSize>50MB</maxFileSize>
             <maxHistory>14</maxHistory>
+            <totalSizeCap>1GB</totalSizeCap>
         </rollingPolicy>
         <encoder>
             <pattern>%d{yyyy-MM-dd HH:mm:ss} %-5level %logger{36} - %msg%n</pattern>
@@ -18,6 +22,8 @@
     </appender>
 
     <logger name="it.tdlight" level="WARN"/>
+    <!-- отсев входящих (не тот чат, заглушённый чат) виден только здесь -->
+    <logger name="ru.rainedev.raine" level="DEBUG"/>
 
     <root level="INFO">
         <appender-ref ref="STDOUT"/>

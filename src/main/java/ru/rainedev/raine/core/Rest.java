@@ -13,7 +13,7 @@ import org.slf4j.LoggerFactory;
  * собеседник иногда отходит, и сообщения за это время накапливаются, а потом
  * читаются разом. Сообщение владельца будит — как звонок посреди дня.
  */
-public final class Rest {
+public class Rest {
 
     private static final Logger log = LoggerFactory.getLogger(Rest.class);
 

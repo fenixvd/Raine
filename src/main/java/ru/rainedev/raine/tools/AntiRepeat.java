@@ -29,7 +29,7 @@ public final class AntiRepeat {
 
     private final LlmClient llm;
     private final java.util.function.Supplier<String> rejectionPrompt;
-    private final ru.rainedev.raine.config.Config.Repeat limits;
+    private volatile ru.rainedev.raine.config.Config.Repeat limits;
     private final Map<String, double[]> spoken = new LinkedHashMap<>();
 
     private double indulgence;
@@ -46,6 +46,10 @@ public final class AntiRepeat {
                       ru.rainedev.raine.config.Config.Repeat limits) {
         this.llm = llm;
         this.rejectionPrompt = rejectionPrompt;
+        this.limits = limits;
+    }
+
+    public void limits(ru.rainedev.raine.config.Config.Repeat limits) {
         this.limits = limits;
     }
 

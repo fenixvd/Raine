@@ -25,16 +25,23 @@ public final class DiaryMemory implements Memory {
 
     private final Diary diary;
     private final LlmClient llm;
-    private final int maxLength;
+    private volatile int maxLength;
 
     /**
      * Ниже этой близости запись не вспоминается, как бы ни просел плавающий
      * порог. Без нижней границы пустой или разрозненный дневник утягивает
      * планку в ноль, и в разговор начинает лезть что попало.
      */
-    private final double floor;
+    private volatile double floor;
 
     private double threshold = 0.5;
+
+    /**
+     * Что уже подмешано в этот разговор. По отпечаткам, а не поиском подстроки:
+     * подстрока находится и внутри чужой цитаты, и тогда запись считается
+     * вспомненной, хотя её никто не вспоминал.
+     */
+    private final java.util.Set<Long> injected = new java.util.HashSet<>();
 
     public DiaryMemory(Diary diary, LlmClient llm, int maxLength) {
         this(diary, llm, maxLength, 0.0);
@@ -51,6 +58,12 @@ public final class DiaryMemory implements Memory {
         return threshold;
     }
 
+    /** Настройки правятся на ходу: сколько подмешивать и с какой близости. */
+    public void limits(int maxLength, double floor) {
+        this.maxLength = maxLength;
+        this.floor = floor;
+    }
+
     @Override
     public String recall(List<Message> recentContext) {
         if (diary.isEmpty() || maxLength <= 0 || recentContext.isEmpty()) {
@@ -58,6 +71,7 @@ public final class DiaryMemory implements Memory {
         }
 
         double[] vector;
+        long askedAt = System.currentTimeMillis();
         try {
             vector = llm.embedding(topicOf(recentContext));
         } catch (RuntimeException e) {
@@ -66,8 +80,14 @@ public final class DiaryMemory implements Memory {
             return "";
         }
 
+        long vectorMillis = System.currentTimeMillis() - askedAt;
+        long searchedAt = System.currentTimeMillis();
+        java.util.List<Diary.Match> matches = diary.query(vector);
+        log.debug("Вектор запроса {} мс, поиск по {} записям {} мс",
+                vectorMillis, matches.size(), System.currentTimeMillis() - searchedAt);
+
         StringBuilder recalled = new StringBuilder();
-        for (Diary.Match match : diary.query(vector)) {
+        for (Diary.Match match : matches) {
             if (match.relatedness() < Math.max(floor, threshold)) {
                 if (recalled.isEmpty()) {
                     // ничего не проходит — планка завышена, опускаем её к тому, что реально есть
@@ -81,10 +101,11 @@ public final class DiaryMemory implements Memory {
                 threshold = Math.max(floor, match.relatedness());
                 break;
             }
-            if (alreadyInContext(recentContext, match.entry().body())) {
+            if (injected.contains(Fingerprint.of(match.entry().body()))) {
                 continue;
             }
             DiaryEntry entry = diary.take(match);
+            injected.add(Fingerprint.of(entry.body()));
             recalled.append("<").append(TAG).append(">\n")
                     .append(entry.body()).append("\n")
                     .append("</").append(TAG).append(">\n");
@@ -113,8 +134,8 @@ public final class DiaryMemory implements Memory {
         }
     }
 
-    /** Тратить токены на то, что уже лежит в контексте, незачем. */
-    private static boolean alreadyInContext(List<Message> context, String body) {
-        return context.stream().anyMatch(m -> m.content() != null && m.content().contains(body));
+    /** Разговор начался заново — прежние воспоминания снова можно вспомнить. */
+    public void forget() {
+        injected.clear();
     }
 }

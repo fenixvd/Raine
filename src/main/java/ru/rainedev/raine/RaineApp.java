@@ -43,6 +43,9 @@ public final class RaineApp implements AutoCloseable {
     private final Config config;
     private final SimpleTelegramClient client;
 
+    /** Правки в config.properties подхватываются на ходу — как и промпты. */
+    private ru.rainedev.raine.config.LiveConfig settings;
+
     private Telegram telegram;
     private TelegramTools tools;
     private NotificationLoop loop;
@@ -112,6 +115,10 @@ public final class RaineApp implements AutoCloseable {
         if (config.vision().enabled()) {
             vision = new Vision(llm, prompts, config.vision().cacheDir(),
                     config.vision().model(), config.vision().cheapModel(), config.character().name());
+            var hearing = new ru.rainedev.raine.speech.SpeechToText(config.hearing());
+            if (hearing.isAvailable() && ru.rainedev.raine.vision.VideoAudio.isAvailable()) {
+                vision.hearing(hearing);
+            }
             telegramMedia = new TelegramMedia(telegram, vision, () -> loop == null ? List.of() : loop.context());
             media = telegramMedia;
         } else {
@@ -130,9 +137,9 @@ public final class RaineApp implements AutoCloseable {
             log.warn("Режим только чтения: Raine думает, но ничего не отправляет и не открывает чаты");
         }
 
-        tools = new TelegramTools(telegram, actions, new ChatScreen(formatter, prompts), lockdown,
-                new AntiRepeat(llm, prompts.lazy("anti_repeat.md"), config.repeat()));
-        tools.behaviour(config.behaviour());
+        AntiRepeat antiRepeat = new AntiRepeat(llm, prompts.lazy("anti_repeat.md"), config.repeat());
+        tools = new TelegramTools(telegram, actions, new ChatScreen(formatter, prompts).recentDepth(config.vision().recentDepth()),
+                lockdown, antiRepeat);
         if (telegramMedia != null) {
             tools.media(telegramMedia);
         }
@@ -180,7 +187,9 @@ public final class RaineApp implements AutoCloseable {
                 llm,
                 () -> prompts.system(around.asPromptSuffix() + workingMemory.asPromptSuffix()),
                 always, config.contextTokenLimit());
-        loop.memory(new DiaryMemory(diary, llm, config.diaryInjectionMaxLength(), config.diaryMinRelatedness()));
+        DiaryMemory diaryMemory = new DiaryMemory(diary, llm,
+                config.diaryInjectionMaxLength(), config.diaryMinRelatedness());
+        loop.memory(diaryMemory);
         DiaryWriter writer = new DiaryWriter(
                 diary, llm, prompts.lazy("diary_save.md"), config.diaryPlagiarismThreshold());
         loop.onContextOverflow(() -> {
@@ -194,6 +203,7 @@ public final class RaineApp implements AutoCloseable {
                 log.error("Не удалось сохранить память — разговор будет потерян", e);
             }
             loop.clearContext();
+            diaryMemory.forget();
             diary.reload();
         });
 
@@ -201,8 +211,20 @@ public final class RaineApp implements AutoCloseable {
         loop.onNotificationDone(done -> tools.closeOpened());
 
         rest = new Rest(random);
-        rest.dayNaps(config.behaviour().dayNaps());
         loop.rest(rest);
+
+        // всё, что можно поменять, не перезапуская бота
+        settings = new ru.rainedev.raine.config.LiveConfig(Config.defaultFile(), config)
+                .onChange(fresh -> {
+                    tools.behaviour(fresh.behaviour());
+                    rest.dayNaps(fresh.behaviour().dayNaps());
+                    lockdown.mode(ru.rainedev.raine.telegram.Lockdown.Mode.of(fresh.lockdown()));
+                    lockdown.allowChannels(fresh.lockdownAllowChannels());
+                    antiRepeat.limits(fresh.repeat());
+                    diaryMemory.limits(fresh.diaryInjectionMaxLength(), fresh.diaryMinRelatedness());
+                    ru.rainedev.raine.llm.Transcript.enabled(fresh.llmTranscript());
+                });
+        settings.watch();
 
         if (config.night().enabled()) {
             var night = new ru.rainedev.raine.core.NightSleep(
@@ -302,6 +324,15 @@ public final class RaineApp implements AutoCloseable {
         }
     }
 
+    /**
+     * События Telegram разносит один поток, и он же доставляет ответы на наши
+     * запросы. Спросить у него что-нибудь и подождать ответа прямо здесь —
+     * значит остановить его навсегда: ответа он принести не сможет, потому что
+     * ждёт сам себя. После такого клиент глохнет целиком, молча.
+     * <p>
+     * Поэтому здесь только то, что считается на месте, а всё остальное —
+     * включая проверку круга общения — уходит на отдельный поток.
+     */
     private void onNewMessage(TdApi.UpdateNewMessage update) {
         if (loop == null) {
             return;
@@ -315,6 +346,17 @@ public final class RaineApp implements AutoCloseable {
         if (senderId == config.ownerId() && rest != null) {
             rest.wakeUp();   // сообщение владельца поднимает, даже если она отошла
         }
+        Thread.ofVirtual().name("raine-incoming").start(() -> {
+            try {
+                receive(message, senderId);
+            } catch (RuntimeException e) {
+                log.error("Не удалось разобрать входящее", e);
+            }
+        });
+    }
+
+    private void receive(TdApi.Message message, long senderId) {
+        log.debug("Входящее из чата {} от {}", message.chatId, senderId);
         // судим по чату, а не только по отправителю: в разрешённой группе пишут
         // и незнакомые, и это нормально — переписка там общая
         if (!lockdown.allows(telegram.chatCached(message.chatId), telegram.isContact(senderId))) {
@@ -330,21 +372,14 @@ public final class RaineApp implements AutoCloseable {
             return;
         }
 
-        // обработку уносим с потока апдейтов: она ходит в сеть и длится секунды
-        Thread.ofVirtual().start(() -> {
-            try {
-                if (handledAsCommand(message, senderId)) {
-                    return;
-                }
-                notifyAbout(message, senderId);
-            } catch (RuntimeException e) {
-                log.error("Не удалось построить уведомление", e);
-            }
-        });
+        if (handledAsCommand(message, senderId)) {
+            return;
+        }
+        notifyAbout(message, senderId);
     }
 
     private void noticeLater() {
-        int seconds = config.noticeDelaySeconds();
+        int seconds = settings == null ? config.noticeDelaySeconds() : settings.current().noticeDelaySeconds();
         if (seconds <= 0) {
             return;
         }
@@ -435,7 +470,7 @@ public final class RaineApp implements AutoCloseable {
         // сообщение владельца и закреплённые чаты идут вне очереди: остальное
         // подождёт, а это — то, ради чего она вообще здесь
         boolean important = senderId == config.ownerId()
-                || (config.behaviour().wakeOnPinnedChat() && telegram.isPinned(chat.id));
+                || (behaviour().wakeOnPinnedChat() && telegram.isPinned(chat.id));
         if (important) {
             loop.submitFirst(new Notification(text, available));
             log.info("Уведомление из чата \"{}\" — вне очереди", chat.title);
@@ -443,6 +478,11 @@ public final class RaineApp implements AutoCloseable {
             loop.submit(new Notification(text, available));
             log.info("Уведомление из чата \"{}\" поставлено в очередь", chat.title);
         }
+    }
+
+    /** Повадки берутся из живых настроек: их правят чаще всего. */
+    private Config.Behaviour behaviour() {
+        return settings == null ? config.behaviour() : settings.current().behaviour();
     }
 
     /** Остановка по непоправимой причине: разбудить main, чтобы процесс завершился. */
@@ -456,6 +496,9 @@ public final class RaineApp implements AutoCloseable {
 
     @Override
     public void close() throws Exception {
+        if (settings != null) {
+            settings.close();
+        }
         if (spontaneity != null) {
             spontaneity.close();
         }

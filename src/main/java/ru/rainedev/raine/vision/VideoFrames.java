@@ -70,6 +70,34 @@ public final class VideoFrames {
             // формат может оказаться неподдерживаемым — это не повод ломать разговор
             log.debug("Видео не разобралось: {}", e.getMessage());
         }
+        return frames.isEmpty() ? viaFfmpeg(video) : frames;
+    }
+
+    /**
+     * Запасной путь: свой декодер спотыкается на части форматов (например,
+     * на чересстрочном h264), а ffmpeg, если он есть, разбирает почти всё.
+     */
+    private static List<Frame> viaFfmpeg(Path video) {
+        double duration = VideoAudio.duration(video);
+        int count = countFor(duration);
+        List<Frame> frames = new ArrayList<>();
+        for (Path file : VideoAudio.frames(video, count, duration)) {
+            try {
+                double at = count > 1 && duration > 0 ? duration * frames.size() / (count - 1) : 0;
+                frames.add(new Frame(at, at + MIN_STEP_SECONDS, java.nio.file.Files.readAllBytes(file)));
+            } catch (IOException e) {
+                log.debug("Кадр не прочитался: {}", e.getMessage());
+            } finally {
+                try {
+                    java.nio.file.Files.deleteIfExists(file);
+                } catch (IOException ignored) {
+                    // временный файл — не беда
+                }
+            }
+        }
+        if (!frames.isEmpty()) {
+            log.debug("Кадры взяты через ffmpeg: {}", frames.size());
+        }
         return frames;
     }
 

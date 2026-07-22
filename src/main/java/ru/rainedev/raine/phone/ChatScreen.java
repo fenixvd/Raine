@@ -13,6 +13,17 @@ public final class ChatScreen {
     private final MessageFormatter formatter;
     private final Prompts prompts;
 
+    /** Приписки к сообщениям истории — подключаются снаружи. */
+    private final List<HistoryNote> notes = new java.util.ArrayList<>();
+
+    /** У скольких последних сообщений разглядывать вложения. */
+    private int recentDepth = 8;
+
+    public ChatScreen recentDepth(int depth) {
+        this.recentDepth = depth;
+        return this;
+    }
+
     public MessageFormatter formatter() {
         return formatter;
     }
@@ -20,6 +31,11 @@ public final class ChatScreen {
     public ChatScreen(MessageFormatter formatter, Prompts prompts) {
         this.formatter = formatter;
         this.prompts = prompts;
+    }
+
+    public ChatScreen note(HistoryNote note) {
+        notes.add(note);
+        return this;
     }
 
     /**
@@ -38,8 +54,21 @@ public final class ChatScreen {
         if (messages.isEmpty()) {
             text.append("This chat is empty! Only proceed if you looked up a @username and it led you here.\n");
         }
+
+        // вложения свежих сообщений разглядываются заранее и все сразу: по одному
+        // это минута молчания, пока собеседник смотрит на непрочитанное
+        int from = Math.max(0, messages.size() - recentDepth);
+        List<TdApi.Message> recent = messages.subList(from, messages.size());
+        MediaAhead.look(formatter.media(), recent);
+
         for (TdApi.Message message : messages) {
-            text.append(formatter.format(message, view));
+            String rendered = recent.contains(message)
+                    ? formatter.format(message, view)
+                    : formatter.formatBriefly(message, view);
+            for (HistoryNote note : notes) {
+                rendered = note.addTo(chat, message, rendered);
+            }
+            text.append(rendered);
         }
 
         text.append(instructions(chat, kind));

@@ -48,9 +48,17 @@ public final class WorkingMemory {
         this.characterName = characterName;
     }
 
+    /**
+     * Файл чистится и при чтении тоже, а не только при записи: его правят руками,
+     * переносят с прежней машины, а иногда там оседает разметка чужой модели —
+     * и всё это уходит прямо в системный промпт, где ему совсем не место.
+     */
     public String read() {
         try {
-            return Files.exists(file) ? Files.readString(file).strip() : "";
+            if (!Files.exists(file)) {
+                return "";
+            }
+            return ModelText.unwrap(Files.readString(file), "things_to_remember");
         } catch (IOException e) {
             log.warn("Не удалось прочитать рабочую память: {}", e.getMessage());
             return "";

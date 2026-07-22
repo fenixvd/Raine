@@ -27,6 +27,9 @@ public final class NotificationLoop {
     /** Страховка от зацикливания: живой ход столько шагов не занимает. */
     private static final int MAX_STEPS_PER_NOTIFICATION = 24;
 
+    /** Как часто в тишине переспрашивать себя, не пора ли отдохнуть. */
+    private java.time.Duration idleCheck = java.time.Duration.ofMinutes(1);
+
     private static final String ASK_REMINDER = """
             [system] Have you called #ask yet this turn? If the message involves personal topics, past events, \
             questions, or people you know — call #ask BEFORE send_telegram_message.""";
@@ -88,6 +91,11 @@ public final class NotificationLoop {
         this.onIdle = action;
     }
 
+    /** Для проверок: как долго молчание считается тишиной. */
+    void idleCheck(java.time.Duration howOften) {
+        this.idleCheck = howOften;
+    }
+
     public void onNotificationDone(java.util.function.Consumer<Notification> action) {
         this.onNotificationDone.add(action);
     }
@@ -123,7 +131,14 @@ public final class NotificationLoop {
                     // прочитается разом, как это и бывает у человека
                     rest.maybeRest();
                 }
-                Notification notification = queue.take();
+                // ждём не бесконечно: разговор затих — значит через минуту снова
+                // проверим, не пора ли спать. Иначе разбуженная среди ночи она
+                // так и осталась бы на ногах до утра, пока ей не напишут ещё раз
+                Notification notification =
+                        queue.poll(idleCheck.toMillis(), java.util.concurrent.TimeUnit.MILLISECONDS);
+                if (notification == null) {
+                    continue;
+                }
                 process(notification);
                 notifyDone(notification);
                 onIdle.run();
