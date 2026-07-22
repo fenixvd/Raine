@@ -22,8 +22,9 @@
     </appender>
 
     <logger name="it.tdlight" level="WARN"/>
-    <!-- отсев входящих (не тот чат, заглушённый чат) виден только здесь -->
-    <logger name="ru.rainedev.raine" level="DEBUG"/>
+    <!-- отсев входящих и замеры памяти видны только в DEBUG; включается
+         по надобности: ./gradlew run -Praine.log=DEBUG -->
+    <logger name="ru.rainedev.raine" level="${raine.log:-INFO}"/>
 
     <root level="INFO">
         <appender-ref ref="STDOUT"/>

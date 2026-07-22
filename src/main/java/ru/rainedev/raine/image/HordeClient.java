@@ -50,7 +50,16 @@ public final class HordeClient {
     private static final int MAX_DIMENSION = 1024;
 
     private static final Duration POLL_INTERVAL = Duration.ofSeconds(4);
-    private static final Duration TIMEOUT = Duration.ofMinutes(10);
+
+    /**
+     * Сколько ждать своей очереди. Сеть добровольцев — не своя видеокарта:
+     * в загруженный час до картинки бывает три четверти часа, и десять минут
+     * отсекали почти всё, ни разу не дойдя до рисования.
+     */
+    private final Duration timeout;
+
+    /** Как часто говорить в журнал, где мы в очереди. */
+    private static final int REPORT_EVERY_POLLS = 15;
 
     private final ObjectMapper mapper = new ObjectMapper();
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(30)).build();
@@ -60,9 +69,14 @@ public final class HordeClient {
     private final List<String> models;
 
     public HordeClient(String baseUrl, String apiKey, List<String> models) {
+        this(baseUrl, apiKey, models, Duration.ofMinutes(60));
+    }
+
+    public HordeClient(String baseUrl, String apiKey, List<String> models, Duration timeout) {
         this.baseUrl = baseUrl.endsWith("/") ? baseUrl : baseUrl + "/";
         this.apiKey = apiKey;
         this.models = models;
+        this.timeout = timeout;
     }
 
     public boolean isAvailable() {
@@ -112,7 +126,8 @@ public final class HordeClient {
     }
 
     private void waitUntilDone(String id) {
-        long deadline = System.currentTimeMillis() + TIMEOUT.toMillis();
+        long deadline = System.currentTimeMillis() + timeout.toMillis();
+        int polls = 0;
         while (System.currentTimeMillis() < deadline) {
             sleep();
             JsonNode check;
@@ -130,10 +145,18 @@ public final class HordeClient {
             if (check.path("done").asBoolean(false)) {
                 return;
             }
-            log.debug("Ожидание очереди: ждём {}, работают {}",
-                    check.path("waiting").asInt(), check.path("processing").asInt());
+            if (!check.path("is_possible").asBoolean(true)) {
+                // некому рисовать: ни один доброволец не берёт такую модель
+                throw new IllegalStateException("Очередь не может выполнить работу: нет подходящих исполнителей");
+            }
+            // без этого «долго рисует» неотличимо от «зависла»
+            if (++polls % REPORT_EVERY_POLLS == 1) {
+                log.info("Стою в очереди: место {}, ждать примерно {} c",
+                        check.path("queue_position").asInt(), check.path("wait_time").asInt());
+            }
         }
-        throw new IllegalStateException("Очередь не успела за отведённое время");
+        throw new IllegalStateException(
+                "Очередь не успела за отведённое время (" + timeout.toMinutes() + " мин)");
     }
 
     private String imageUrl(String id) {

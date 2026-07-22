@@ -267,7 +267,9 @@ public final class Telegram {
             collect(emoji, available.recentReactions);
             collect(emoji, available.popularReactions);
         } catch (RuntimeException e) {
-            log.debug("Список доступных реакций не получен: {}", e.getMessage());
+            // не мелочь: без списка реакция не ставится вообще, а выглядит это
+            // как «реакции иногда не работают» без единого следа в журнале
+            log.info("Список доступных реакций для сообщения {} не получен: {}", messageId, e.getMessage());
         }
         return emoji;
     }

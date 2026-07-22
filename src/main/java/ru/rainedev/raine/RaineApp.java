@@ -46,6 +46,19 @@ public final class RaineApp implements AutoCloseable {
     /** Правки в config.properties подхватываются на ходу — как и промпты. */
     private ru.rainedev.raine.config.LiveConfig settings;
 
+    /** Перенести разговор в память. Зовётся при переполнении и при остановке. */
+    private java.util.function.Consumer<String> rememberConversation = why -> { };
+
+    private final java.util.concurrent.atomic.AtomicBoolean closing =
+            new java.util.concurrent.atomic.AtomicBoolean();
+
+    /**
+     * TDLib начинает закрываться сам, не спрашивая нас: при остановке процесса
+     * его собственный обработчик может сработать раньше нашего. Обращаться
+     * к закрывающемуся клиенту нельзя — вызов повисает на минуты.
+     */
+    private volatile boolean telegramClosing;
+
     private Telegram telegram;
     private TelegramTools tools;
     private NotificationLoop loop;
@@ -60,6 +73,9 @@ public final class RaineApp implements AutoCloseable {
 
     /** Столько чатов просматривается при запуске в поисках непрочитанного. */
     private static final int CATCH_UP_CHATS = 50;
+
+    /** Сколько ждём, пока начатый ход договорит. Дольше — уже не остановка, а зависание. */
+    private static final java.time.Duration SHUTDOWN_GRACE = java.time.Duration.ofMinutes(2);
 
     /** Насколько часто сообщение из заглушённого чата остаётся без внимания. */
     private static final double MUTED_IGNORE_CHANCE = 0.8;
@@ -97,11 +113,7 @@ public final class RaineApp implements AutoCloseable {
         telegram = new Telegram(client, config.character().name());
         lockdown = new Lockdown(Lockdown.Mode.of(config.lockdown()), config.ownerId(),
                 config.lockdownAllowChannels());
-        log.info("Круг общения: {}", switch (lockdown.mode()) {
-            case NONE -> "все";
-            case CONTACTS_ONLY -> "только контакты";
-            case OWNER_ONLY -> "только владелец";
-        });
+        log.info("Круг общения: {}", describe(lockdown.mode()));
         // без этого поиск по своим чатам возвращает пустоту: TDLib ищет
         // только по тому, что уже загружено с сервера
         telegram.loadChats(200);
@@ -145,7 +157,8 @@ public final class RaineApp implements AutoCloseable {
         }
 
         var horde = new ru.rainedev.raine.image.HordeClient(
-                config.camera().baseUrl(), config.camera().apiKey(), config.camera().models());
+                config.camera().baseUrl(), config.camera().apiKey(), config.camera().models(),
+                java.time.Duration.ofMinutes(config.camera().queueMinutes()));
         if (config.camera().enabled() && horde.isAvailable()) {
             tools.camera(new ru.rainedev.raine.image.ImageGenerator(horde, llm, prompts,
                     config.camera().gallery(), config.character().name(),
@@ -192,9 +205,12 @@ public final class RaineApp implements AutoCloseable {
         loop.memory(diaryMemory);
         DiaryWriter writer = new DiaryWriter(
                 diary, llm, prompts.lazy("diary_save.md"), config.diaryPlagiarismThreshold());
-        loop.onContextOverflow(() -> {
-            // разговор не выбрасываем, а переносим в долгую память
-            log.info("Контекст переполнен — переношу разговор в дневник");
+        // разговор не выбрасываем, а переносим в долгую память
+        rememberConversation = why -> {
+            if (loop.context().isEmpty()) {
+                return;
+            }
+            log.info("{} — переношу разговор в дневник", why);
             try {
                 // сначала средняя память: ей нужен ещё не урезанный разговор
                 workingMemory.update(prompts.system(""), loop.context());
@@ -205,7 +221,8 @@ public final class RaineApp implements AutoCloseable {
             loop.clearContext();
             diaryMemory.forget();
             diary.reload();
-        });
+        };
+        loop.onContextOverflow(() -> rememberConversation.accept("Контекст переполнен"));
 
         // ход закончен — выходим из чатов, в которые заходили
         loop.onNotificationDone(done -> tools.closeOpened());
@@ -216,6 +233,11 @@ public final class RaineApp implements AutoCloseable {
         // всё, что можно поменять, не перезапуская бота
         settings = new ru.rainedev.raine.config.LiveConfig(Config.defaultFile(), config)
                 .onChange(fresh -> {
+                    var circle = ru.rainedev.raine.telegram.Lockdown.Mode.of(fresh.lockdown());
+                    if (circle != lockdown.mode() || fresh.lockdownAllowChannels() != lockdown.allowsChannels()) {
+                        log.info("Круг общения теперь: {}{}", describe(circle),
+                                fresh.lockdownAllowChannels() ? ", каналы читаю" : ", каналы не читаю");
+                    }
                     tools.behaviour(fresh.behaviour());
                     rest.dayNaps(fresh.behaviour().dayNaps());
                     lockdown.mode(ru.rainedev.raine.telegram.Lockdown.Mode.of(fresh.lockdown()));
@@ -245,6 +267,7 @@ public final class RaineApp implements AutoCloseable {
         }
 
         spontaneity = new Spontaneity(loop, diary, always, random);
+        spontaneity.asleepWhen(rest::isResting);
         tools.actingOnImpulse(spontaneity::isActing);
         spontaneity.start();
 
@@ -303,8 +326,14 @@ public final class RaineApp implements AutoCloseable {
     private void onAuthorizationState(TdApi.UpdateAuthorizationState update) {
         switch (update.authorizationState) {
             case TdApi.AuthorizationStateReady ignored -> log.info("Авторизация пройдена");
-            case TdApi.AuthorizationStateClosing ignored -> log.info("Закрываемся...");
-            case TdApi.AuthorizationStateClosed ignored -> log.info("Закрыто");
+            case TdApi.AuthorizationStateClosing ignored -> {
+                telegramClosing = true;
+                log.info("Закрываемся...");
+            }
+            case TdApi.AuthorizationStateClosed ignored -> {
+                telegramClosing = true;
+                log.info("Закрыто");
+            }
             case TdApi.AuthorizationStateLoggingOut ignored -> log.info("Выходим из аккаунта...");
             default -> log.debug("Состояние авторизации: {}",
                     update.authorizationState.getClass().getSimpleName());
@@ -480,6 +509,14 @@ public final class RaineApp implements AutoCloseable {
         }
     }
 
+    private static String describe(Lockdown.Mode mode) {
+        return switch (mode) {
+            case NONE -> "все";
+            case CONTACTS_ONLY -> "только контакты";
+            case OWNER_ONLY -> "только владелец";
+        };
+    }
+
     /** Повадки берутся из живых настроек: их правят чаще всего. */
     private Config.Behaviour behaviour() {
         return settings == null ? config.behaviour() : settings.current().behaviour();
@@ -490,21 +527,61 @@ public final class RaineApp implements AutoCloseable {
         try {
             close();
         } catch (Exception e) {
-            log.warn("При остановке что-то пошло не так: {}", e.getMessage());
+            log.warn("При остановке что-то пошло не так", e);
         }
     }
 
+    /**
+     * Остановка по-человечески: начатый ход доводится до конца, а всё сказанное
+     * за сеанс уходит в память. Оборвать посреди хода — значит потерять разговор
+     * целиком: он живёт в оперативной памяти до самой записи в дневник.
+     */
     @Override
     public void close() throws Exception {
+        if (!closing.compareAndSet(false, true)) {
+            return;   // остановка может прийти и сигналом, и из main разом
+        }
+        log.info("Останавливаюсь. Дайте время сохранить разговор");
+
         if (settings != null) {
             settings.close();
         }
         if (spontaneity != null) {
-            spontaneity.close();
+            spontaneity.close();   // новых порывов не заводим
+        }
+        if (loop != null) {
+            loop.stop();
+            if (!loop.awaitStopped(SHUTDOWN_GRACE)) {
+                log.warn("Ход не успел закончиться за {} — сохраняю как есть", SHUTDOWN_GRACE);
+            }
+            rememberConversation.accept("Останавливаюсь");
+        }
+        // прощаемся с Telegram, только если он ещё слушает: он закрывается сам
+        // и своим чередом, а вызов в закрывающийся клиент повисает надолго
+        if (!telegramClosing) {
+            if (tools != null) {
+                tools.closeOpened();   // выходим из чатов, а не бросаем их открытыми
+            }
+            if (actions != null) {
+                actions.setOnline(false);
+            }
+        } else {
+            log.debug("Telegram уже закрывается — прощаться через него не буду");
         }
         if (brain != null) {
             brain.interrupt();
         }
-        client.close();
+        // если Telegram закрывается сам, ждать от него подтверждения бессмысленно:
+        // ответа не будет, а ожидание длится полторы минуты на пустом месте
+        if (telegramClosing) {
+            log.debug("Telegram закрывается сам — подтверждения не жду");
+        } else {
+            try {
+                client.close();
+            } catch (RuntimeException e) {
+                log.debug("Telegram закрылся не попрощавшись: {}", e.getClass().getSimpleName());
+            }
+        }
+        log.info("Всё сохранено, до встречи");
     }
 }

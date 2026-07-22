@@ -61,6 +61,10 @@ public final class Lockdown {
         this.allowChannels = allowed;
     }
 
+    public boolean allowsChannels() {
+        return allowChannels;
+    }
+
     public boolean allows(TdApi.Chat chat, boolean isContact) {
         if (mode == Mode.NONE || chat == null) {
             return mode == Mode.NONE;

@@ -571,6 +571,8 @@ public final class TelegramTools {
                     long messageId = Numbers.longAt(arguments, "message_id", 0);
                     String wanted = Emoji.normalize(arguments.path("emoji").asText(""));
                     if (wanted.isEmpty()) {
+                        log.info("Реакция не поставлена: эмодзи не разобрано ({})",
+                                arguments.path("emoji").asText(""));
                         return "Provide an emoji to react with.";
                     }
 
@@ -587,9 +589,14 @@ public final class TelegramTools {
                         if (available.isEmpty()) {
                             // важно сказать, что это не поломка: иначе она решит,
                             // что инструмент сломан, и перестанет им пользоваться
+                            log.info("В чате {} реакции отключены — сообщение {} без реакции", chatId, messageId);
                             return "Reactions are disabled for this message — you can't react here. "
                                     + "Just skip it, this is not an error.";
                         }
+                        // без этой строки «реакции иногда не работают» не расследовать:
+                        // отказ уходит модели, а в журнале не остаётся ничего
+                        log.info("Реакция {} недоступна для сообщения {}; здесь можно: {}",
+                                wanted, messageId, String.join(" ", available));
                         return "The reaction " + wanted + " isn't available for this message. Allowed here: "
                                 + String.join(" ", available) + ". Pick one of those, or just skip reacting.";
                     }

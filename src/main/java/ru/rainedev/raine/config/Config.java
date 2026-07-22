@@ -79,8 +79,12 @@ public record Config(
     public record Hearing(boolean enabled, String baseUrl, String apiKey, String model, String language) {}
 
     /** Генерация снимков. */
+    /**
+     * @param queueMinutes сколько ждать своей очереди в сети добровольцев:
+     *                     в загруженный час до картинки бывает три четверти часа
+     */
     public record Camera(boolean enabled, String baseUrl, String apiKey, java.util.List<String> models,
-                         Path gallery, int maxTrials) {}
+                         Path gallery, int maxTrials, int queueMinutes) {}
 
     /** Значения, подставляемые в промпты вместо ${CHARACTER_NAME} и прочих. */
     public record Character(String name, String nickname, String papikName) {}
@@ -173,7 +177,9 @@ public record Config(
                                 "WAI-NSFW-illustrious-SDXL,AMPonyXL,AlbedoBase XL (SDXL),Nova Anime XL",
                                 "модели рисования через запятую").split(",")),
                         s.path("camera_gallery", "data/gallery", "галерея снимков"),
-                        s.integer("camera_max_trials", 3, "сколько раз переснимать, пока снимок не удастся")),
+                        s.integer("camera_max_trials", 3, "сколько раз переснимать, пока снимок не удастся"),
+                        s.integer("camera_queue_minutes", 60,
+                                "сколько минут ждать своей очереди в сети добровольцев")),
                 s.get("web_search_url", "https://ollama.com/api/web_search", "адрес поиска в сети"),
                 s.get("web_search_key", "", "ключ поиска в сети; пустой — поиска не будет"),
                 new Llm(

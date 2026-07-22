@@ -22,7 +22,12 @@ public final class Spontaneity implements AutoCloseable {
 
     private static final Logger log = LoggerFactory.getLogger(Spontaneity.class);
 
-    private static final Duration INTERVAL = Duration.ofMinutes(27);
+    /**
+     * Между порывами — от получаса до трёх четвертей часа, каждый раз заново.
+     * Ровный интервал читался бы как расписание: «опять ровно в 27 минут».
+     */
+    private static final int MIN_MINUTES = 27;
+    private static final int MAX_MINUTES = 47;
 
     /** Срабатывает примерно в половине случаев. */
     private static final double CHANCE = 0.5;
@@ -45,6 +50,8 @@ public final class Spontaneity implements AutoCloseable {
     private final Toolbox tools;
     private final RandomGenerator random;
 
+    private java.util.function.BooleanSupplier asleep = () -> false;
+
     /** Порыв, который сейчас в очереди или в работе. */
     private final java.util.concurrent.atomic.AtomicReference<Notification> pending =
             new java.util.concurrent.atomic.AtomicReference<>();
@@ -64,6 +71,11 @@ public final class Spontaneity implements AutoCloseable {
         return acting.get();
     }
 
+    /** Пока она отдыхает, порывов не бывает. */
+    public void asleepWhen(java.util.function.BooleanSupplier asleep) {
+        this.asleep = asleep;
+    }
+
     public void start() {
         // признак снимается, когда порыв дошёл до обработки и завершился
         loop.onNotificationDone(done -> {
@@ -72,13 +84,36 @@ public final class Spontaneity implements AutoCloseable {
                 acting.set(false);
             }
         });
-        scheduler.scheduleAtFixedRate(this::maybeAct,
-                INTERVAL.toMinutes(), INTERVAL.toMinutes(), TimeUnit.MINUTES);
-        log.info("Спонтанность включена: проверка раз в {} минут", INTERVAL.toMinutes());
+        scheduleNext();
+        log.info("Спонтанность включена: порывы через {}–{} минут", MIN_MINUTES, MAX_MINUTES);
+    }
+
+    private void scheduleNext() {
+        long minutes = MIN_MINUTES + random.nextInt(MAX_MINUTES - MIN_MINUTES + 1);
+        scheduler.schedule(this::tick, minutes, TimeUnit.MINUTES);
+    }
+
+    private void tick() {
+        try {
+            maybeAct();
+        } finally {
+            scheduleNext();   // следующий раз — снова через новое время
+        }
+    }
+
+    /** Для проверок: попробовать прямо сейчас, не дожидаясь своего времени. */
+    void actNow() {
+        maybeAct();
     }
 
     private void maybeAct() {
         try {
+            // спящему человеку ничего не приходит в голову: ни разговоров,
+            // ни записей в память, ни строчек в журнале
+            if (asleep.getAsBoolean()) {
+                log.debug("Сплю — порыв подождёт до пробуждения");
+                return;
+            }
             if (random.nextDouble() >= CHANCE) {
                 return;
             }

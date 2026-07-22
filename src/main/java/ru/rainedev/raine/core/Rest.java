@@ -40,6 +40,9 @@ public class Rest {
     private final AtomicBoolean awoken = new AtomicBoolean();
     private volatile boolean resting;
 
+    /** Пора закрываться: спать больше незачем, и досыпать тем более. */
+    private volatile boolean stopping;
+
     public Rest(RandomGenerator random) {
         this.random = random;
     }
@@ -73,8 +76,16 @@ public class Rest {
         awoken.set(true);
     }
 
+    /** Работа заканчивается: прекратить отдых и больше в него не уходить. */
+    public void stop() {
+        stopping = true;
+    }
+
     /** Иногда отходит. Возвращается сама или от сообщения владельца. */
     public void maybeRest() {
+        if (stopping) {
+            return;
+        }
         if (night != null) {
             var untilMorning = night.untilMorning();
             if (untilMorning.isPresent()) {
@@ -108,6 +119,10 @@ public class Rest {
             for (long waited = 0; waited < duration.toSeconds(); waited++) {
                 if (awoken.get()) {
                     log.info("Вернулась раньше — меня позвали");
+                    return;
+                }
+                if (stopping) {
+                    log.info("Просыпаюсь: пора закрываться");
                     return;
                 }
                 Thread.sleep(TICK);

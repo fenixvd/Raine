@@ -27,6 +27,12 @@ public final class NotificationLoop {
     /** Страховка от зацикливания: живой ход столько шагов не занимает. */
     private static final int MAX_STEPS_PER_NOTIFICATION = 24;
 
+    /** Сигнал «пора заканчивать»: кладётся в очередь, чтобы разбудить ожидание. */
+    private static final Notification STOP = new Notification("", new Toolbox());
+
+    private volatile boolean stopping;
+    private final java.util.concurrent.CountDownLatch stopped = new java.util.concurrent.CountDownLatch(1);
+
     /** Как часто в тишине переспрашивать себя, не пора ли отдохнуть. */
     private java.time.Duration idleCheck = java.time.Duration.ofMinutes(1);
 
@@ -91,6 +97,29 @@ public final class NotificationLoop {
         this.onIdle = action;
     }
 
+    /**
+     * Просит закончить: начатый ход доводится до конца, новые не берутся.
+     * Обрывать разговор на полуслове нельзя — то, что уже сказано, ещё
+     * не сохранено, и человек останется с недописанной фразой.
+     */
+    public void stop() {
+        stopping = true;
+        if (rest != null) {
+            rest.stop();   // если она спит до утра, будим: закрываемся
+        }
+        queue.addFirst(STOP);   // будим ожидание, если она стоит в тишине
+    }
+
+    /** @return успела ли закончить сама */
+    public boolean awaitStopped(java.time.Duration limit) {
+        try {
+            return stopped.await(limit.toMillis(), java.util.concurrent.TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
+    }
+
     /** Для проверок: как долго молчание считается тишиной. */
     void idleCheck(java.time.Duration howOften) {
         this.idleCheck = howOften;
@@ -112,6 +141,11 @@ public final class NotificationLoop {
     /** Убирает устаревшие уведомления — например, когда чат уже открыт вручную. */
     public void discardMatching(String substring) {
         queue.removeIf(notification -> notification.text().contains(substring));
+    }
+
+    /** Сколько уведомлений ждёт разбора. */
+    public int queued() {
+        return queue.size();
     }
 
     public List<Message> context() {
@@ -136,6 +170,11 @@ public final class NotificationLoop {
                 // так и осталась бы на ногах до утра, пока ей не напишут ещё раз
                 Notification notification =
                         queue.poll(idleCheck.toMillis(), java.util.concurrent.TimeUnit.MILLISECONDS);
+                if (stopping) {
+                    log.info("Заканчиваю: новых уведомлений больше не беру");
+                    stopped.countDown();
+                    return;
+                }
                 if (notification == null) {
                     continue;
                 }
@@ -144,6 +183,7 @@ public final class NotificationLoop {
                 onIdle.run();
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
+                stopped.countDown();
                 return;
             } catch (RuntimeException e) {
                 if (Fatal.check(e)) {

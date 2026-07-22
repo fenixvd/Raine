@@ -68,6 +68,8 @@ tasks.named<JavaExec>("run") {
     // -Praine.tdlib.verbosity=3 — когда надо увидеть, что приходит с сервера
     systemProperty("raine.tdlib.verbosity",
             providers.gradleProperty("raine.tdlib.verbosity").getOrElse("1"))
+    // -Praine.log=DEBUG — подробности отсева входящих и замеры памяти
+    systemProperty("raine.log", providers.gradleProperty("raine.log").getOrElse("INFO"))
 }
 
 tasks.named<CreateStartScripts>("startScripts") {

@@ -57,6 +57,17 @@ public final class Main {
             }
 
             try (RaineApp app = new RaineApp(builder, authentication, config)) {
+                // Ctrl+C и kill — обычный способ остановить бота, и оба должны
+                // давать ей договорить и сохранить разговор, а не рвать на полуслове
+                Thread farewell = new Thread(() -> {
+                    try {
+                        app.close();
+                    } catch (Exception e) {
+                        log.warn("При остановке что-то пошло не так", e);
+                    }
+                }, "raine-farewell");
+                Runtime.getRuntime().addShutdownHook(farewell);
+
                 app.start();
                 app.client().waitForExit();
             }
