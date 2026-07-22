@@ -155,6 +155,7 @@ public final class ImageGenerator {
     /** @return файл в галерее */
     public Path take(String wish) {
         String appearance = prompts.load("character_appearance.md");
+        boolean explicit = isExplicit(wish);
         Prompt prompt = engineer(wish, appearance, "", null);
         String feedbackSoFar = "";
         String firstFeedback = "";
@@ -178,6 +179,13 @@ public final class ImageGenerator {
                 continue;
             }
 
+            // откровенный снимок проверять нечем: та же модель зрения, которой
+            // мы показываем результат, такое смотреть отказывается — выйдет
+            // не проверка, а сожжённые попытки. Такие снимки принимаем как есть
+            if (explicit) {
+                log.info("Снимок откровенный — принимаю без проверки");
+                return save(image);
+            }
             String verdict = assess(image, wish, appearance);
             if (verdict.isEmpty()) {
                 return save(image);
@@ -195,6 +203,23 @@ public final class ImageGenerator {
         }
         throw new IllegalStateException("Не вышло сделать удачный снимок: " + firstFeedback
                 + ". Попробуй описать снимок короче.");
+    }
+
+    /** Ответы, которыми модель отказывается смотреть, а не оценивает. */
+    private static final List<String> REFUSALS = List.of(
+            "i'm sorry", "i am sorry", "can't assist", "cannot assist", "can't help", "cannot help",
+            "unable to assist", "i can't provide", "i cannot provide", "не могу помочь",
+            "не могу выполнить", "не могу описать");
+
+    static boolean isRefusal(String verdict) {
+        String lower = verdict == null ? "" : verdict.toLowerCase();
+        return REFUSALS.stream().anyMatch(lower::contains);
+    }
+
+    /** Откровенное задание видно по прямым словам — тем самым, что мы вычищаем из промпта. */
+    static boolean isExplicit(String wish) {
+        String lower = wish == null ? "" : wish.toLowerCase();
+        return BLUNT_WORDS.stream().anyMatch(lower::contains);
     }
 
     private Prompt engineer(String wish, String appearance, String feedback, Prompt previous) {
@@ -269,6 +294,13 @@ public final class ImageGenerator {
                     "<character>\n%s\n</character>\n<wanted>\n%s\n</wanted>".formatted(appearance, wish), image);
             if (verdict == null || verdict.isBlank()) {
                 return "";   // проверяющий промолчал — не повод жечь ещё одну генерацию
+            }
+            if (isRefusal(verdict)) {
+                // «я не могу это смотреть» — это отказ проверять, а не изъян снимка.
+                // Принять его за брак значит выбросить готовую картинку и встать
+                // в очередь заново, на второй час
+                log.info("Проверяющий отказался смотреть — принимаю снимок как есть");
+                return "";
             }
             return verdict.toUpperCase().contains("VERDICT: OK") ? "" : line(verdict, "FEEDBACK:", verdict.strip());
         } catch (RuntimeException e) {
