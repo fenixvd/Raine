@@ -49,6 +49,9 @@ public final class RaineApp implements AutoCloseable {
     /** Перенести разговор в память. Зовётся при переполнении и при остановке. */
     private java.util.function.Consumer<String> rememberConversation = why -> { };
 
+    /** Разговоры, которые не удалось пересказать: сеть отвалилась не вовремя. */
+    private ru.rainedev.raine.memory.PendingConversations pending;
+
     private final java.util.concurrent.atomic.AtomicBoolean closing =
             new java.util.concurrent.atomic.AtomicBoolean();
 
@@ -186,6 +189,8 @@ public final class RaineApp implements AutoCloseable {
         always.add(recall.asTool(this::currentSituation));
         if (config.behaviour().stickers()) {
             always.add(tools.stickers().list());
+            // пак открывают не в чате, а «у себя»: ссылка могла прийти когда угодно
+            always.add(tools.stickers().pack());
         }
         always.add(tools.chatList());
         always.add(tools.contactList());
@@ -206,6 +211,7 @@ public final class RaineApp implements AutoCloseable {
         loop.memory(diaryMemory);
         DiaryWriter writer = new DiaryWriter(
                 diary, llm, prompts.lazy("diary_save.md"), config.diaryPlagiarismThreshold());
+        pending = new ru.rainedev.raine.memory.PendingConversations(config.diaryDir().resolveSibling("pending"));
         // разговор не выбрасываем, а переносим в долгую память
         rememberConversation = why -> {
             if (loop.context().isEmpty()) {
@@ -217,7 +223,11 @@ public final class RaineApp implements AutoCloseable {
                 workingMemory.update(prompts.system(""), loop.context());
                 writer.save(prompts.system(""), loop.context());
             } catch (RuntimeException e) {
-                log.error("Не удалось сохранить память — разговор будет потерян", e);
+                // чаще всего это оборванная сеть на остановке: пересказ делает
+                // модель, а её нет. Разговор откладывается сырым и разбирается
+                // при следующем запуске — потерять целый день из-за связи нельзя
+                log.error("Не удалось сохранить память — откладываю разговор", e);
+                pending.keep(loop.context());
             }
             loop.clearContext();
             diaryMemory.forget();
@@ -279,7 +289,31 @@ public final class RaineApp implements AutoCloseable {
 
         brain = Thread.ofVirtual().name("raine-brain").start(loop::run);
         Thread.ofVirtual().name("raine-catchup").start(this::catchUpOnUnread);
+        Thread.ofVirtual().name("raine-pending").start(() -> rememberPending(writer, prompts.system("")));
         log.info("Raine запущена от имени {} (id {})", config.character().name(), telegram.myId());
+    }
+
+    /**
+     * Отложенное сетью досказывается при первой возможности — не мешая запуску
+     * и не задерживая ответ. Не получилось и сейчас — пусть лежит дальше:
+     * лучше пересказать завтра, чем выбросить сегодня.
+     */
+    private void rememberPending(DiaryWriter writer, String systemPrompt) {
+        for (java.nio.file.Path file : pending.waiting()) {
+            var conversation = pending.read(file);
+            if (conversation.isEmpty()) {
+                pending.done(file);   // читать нечего, держать незачем
+                continue;
+            }
+            try {
+                int saved = writer.save(systemPrompt, conversation).size();
+                pending.done(file);
+                log.info("Отложенный разговор {} пересказан, записей: {}", file.getFileName(), saved);
+            } catch (RuntimeException e) {
+                log.warn("Отложенный разговор {} пока не пересказать: {}", file.getFileName(), e.getMessage());
+                return;   // связи по-прежнему нет, остальные ждут своей очереди
+            }
+        }
     }
 
     /**
