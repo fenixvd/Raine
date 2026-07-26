@@ -604,6 +604,74 @@ public final class Telegram {
         return Optional.ofNullable(stickerFiles.get(stickerId));
     }
 
+    /**
+     * Пак целиком по короткому имени — тому, что стоит в ссылке
+     * {@code t.me/addstickers/<имя>}. Стикеры пака запоминаются: без этого
+     * их нельзя ни отправить, ни забрать себе поштучно.
+     */
+    public Optional<TdApi.StickerSet> stickerSet(String nameOrLink) {
+        String name = stickerSetName(nameOrLink);
+        if (name.isEmpty()) {
+            return Optional.empty();
+        }
+        try {
+            TdApi.SearchStickerSet request = new TdApi.SearchStickerSet();
+            request.name = name;
+            TdApi.StickerSet set = ask(request);
+            for (TdApi.Sticker sticker : set.stickers) {
+                rememberSticker(sticker);
+            }
+            return Optional.of(set);
+        } catch (RuntimeException e) {
+            log.debug("Пак {} не нашёлся: {}", name, e.getMessage());
+            return Optional.empty();
+        }
+    }
+
+    /**
+     * Поставить пак себе. Без этого он живёт только до перезапуска и не виден
+     * в самом Telegram — а стикеры из неустановленного пака человек не пришлёт.
+     */
+    public void installStickerSet(long setId) {
+        TdApi.ChangeStickerSet request = new TdApi.ChangeStickerSet();
+        request.setId = setId;
+        request.isInstalled = true;
+        ask(request);
+    }
+
+    /** Свои паки: по ним видно, из чего вообще есть что выбрать. */
+    public List<TdApi.StickerSetInfo> stickerSets() {
+        try {
+            TdApi.GetInstalledStickerSets request = new TdApi.GetInstalledStickerSets();
+            request.stickerType = new TdApi.StickerTypeRegular();
+            return List.of(ask(request).sets);
+        } catch (RuntimeException e) {
+            log.debug("Установленные паки недоступны: {}", e.getMessage());
+            return List.of();
+        }
+    }
+
+    /**
+     * Имя пака модель приносит как придётся: ссылкой, ссылкой без схемы,
+     * с собачкой или просто именем. Telegram же понимает только короткое имя.
+     */
+    static String stickerSetName(String nameOrLink) {
+        if (nameOrLink == null) {
+            return "";
+        }
+        String name = nameOrLink.strip();
+        int addstickers = name.lastIndexOf("addstickers/");
+        if (addstickers >= 0) {
+            name = name.substring(addstickers + "addstickers/".length());
+        }
+        // хвост ссылки вроде ?single и обрамление из скобок или кавычек
+        int query = name.indexOf('?');
+        if (query >= 0) {
+            name = name.substring(0, query);
+        }
+        return name.replace("@", "").replace("/", "").strip();
+    }
+
     /** Сохранённые и недавние стикеры — то, чем она реально пользуется. */
     public List<TdApi.Sticker> savedStickers(int limit) {
         List<TdApi.Sticker> result = new ArrayList<>();

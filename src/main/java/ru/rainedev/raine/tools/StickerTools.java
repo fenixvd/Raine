@@ -52,20 +52,80 @@ public final class StickerTools {
                 + "Use this before #sticker_send.", arguments -> {
                     List<TdApi.Sticker> stickers = telegram.savedStickers(LIMIT);
                     if (stickers.isEmpty()) {
-                        return "You have no saved stickers yet.";
+                        // паки могут быть и при пустом избранном: тогда выбор есть,
+                        // просто он лежит не здесь
+                        String packs = packsOfMine();
+                        return packs.isEmpty()
+                                ? "You have no saved stickers yet."
+                                : "You have no favourite stickers yet, but you have packs." + packs;
                     }
-                    StringBuilder out = new StringBuilder("<stickers>\n");
-                    for (TdApi.Sticker sticker : stickers) {
-                        out.append("<sticker sticker_id=\"").append(sticker.id)
-                                .append("\" emoji=\"").append(sticker.emoji == null ? "" : sticker.emoji)
-                                .append("\">");
-                        if (media != null) {
-                            out.append('\n').append(media.describeSticker(sticker).strip()).append('\n');
-                        }
-                        out.append("</sticker>\n");
-                    }
-                    return out.append("</stickers>").toString();
+                    return describe(stickers) + packsOfMine();
                 });
+    }
+
+    /**
+     * Целый пак по ссылке. Присланный пак — обычный подарок в переписке,
+     * и брать из него можно было бы только то, что человек прислал поштучно:
+     * поиск по имени открывает весь набор разом.
+     */
+    public Tool pack() {
+        return Tool.named("sticker_pack")
+                .describedAs("Opens a whole sticker pack and keeps it: pass a t.me/addstickers/... link "
+                        + "or just the pack name. Returns every sticker in it, ready for #sticker_send.")
+                .requiredString("name", "Pack link or its short name")
+                .build(arguments -> {
+                    String name = arguments.path("name").asText("");
+                    var found = telegram.stickerSet(name);
+                    if (found.isEmpty()) {
+                        return "There is no such sticker pack. Check the link or the name.";
+                    }
+                    TdApi.StickerSet set = found.get();
+                    if (!set.isInstalled) {
+                        // ставим себе: иначе пак живёт до перезапуска и в Telegram его не видно
+                        telegram.installStickerSet(set.id);
+                    }
+                    log.info("Пак {} ({}) открыт, стикеров: {}", set.name, set.title, set.stickers.length);
+                    List<TdApi.Sticker> shown = set.stickers.length > LIMIT
+                            ? List.of(set.stickers).subList(0, LIMIT)
+                            : List.of(set.stickers);
+                    String tail = set.stickers.length > LIMIT
+                            ? "\nFirst %d of %d stickers.".formatted(LIMIT, set.stickers.length)
+                            : "";
+                    return "Pack \"%s\" is yours now.\n%s%s".formatted(set.title, describe(shown), tail);
+                });
+    }
+
+    /** Список с описаниями — общий вид и для своих стикеров, и для пака. */
+    private String describe(List<TdApi.Sticker> stickers) {
+        StringBuilder out = new StringBuilder("<stickers>\n");
+        for (TdApi.Sticker sticker : stickers) {
+            out.append("<sticker sticker_id=\"").append(sticker.id)
+                    .append("\" emoji=\"").append(sticker.emoji == null ? "" : sticker.emoji)
+                    .append("\">");
+            if (media != null) {
+                out.append('\n').append(media.describeSticker(sticker).strip()).append('\n');
+            }
+            out.append("</sticker>\n");
+        }
+        return out.append("</stickers>").toString();
+    }
+
+    /**
+     * Имена своих паков идут следом за стикерами — без них она не знает,
+     * что у неё вообще есть, и открывать ей нечего. Описания здесь не нужны:
+     * содержимое покажет #sticker_pack, а список должен оставаться дешёвым.
+     */
+    private String packsOfMine() {
+        List<TdApi.StickerSetInfo> sets = telegram.stickerSets();
+        if (sets.isEmpty()) {
+            return "";
+        }
+        StringBuilder out = new StringBuilder("\n<sticker_packs>\n");
+        for (TdApi.StickerSetInfo set : sets) {
+            out.append("<pack name=\"").append(set.name).append("\" title=\"").append(set.title)
+                    .append("\" stickers=\"").append(set.size).append("\" />\n");
+        }
+        return out.append("</sticker_packs>\nOpen any of them with #sticker_pack.").toString();
     }
 
     /** Понравившийся чужой стикер можно забрать себе. */
@@ -80,7 +140,8 @@ public final class StickerTools {
                     }
                     java.util.Optional<Telegram.StickerRef> sticker = telegram.sticker(stickerId);
                     if (sticker.isEmpty()) {
-                        return "You have not seen that sticker. Use sticker_list, or save one you were sent.";
+                        return "You have not seen that sticker. Use sticker_list, open a pack with "
+                                + "sticker_pack, or save one you were sent.";
                     }
                     actions.saveSticker(sticker.get());
                     log.info("Стикер {} сохранён", stickerId);
@@ -104,13 +165,13 @@ public final class StickerTools {
                         return "You cannot send anything to that chat.";
                     }
                     long stickerId = ru.rainedev.raine.core.Numbers.longAt(arguments, "sticker_id", 0);
-                    boolean known = telegram.savedStickers(LIMIT).stream().anyMatch(s -> s.id == stickerId);
-                    if (!known) {
-                        return "You don't have this sticker. Call sticker_list to see your stickers.";
-                    }
+                    // отправить можно всё, что ей известно: избранное, недавнее,
+                    // открытый пак, присланный только что стикер. Проверка по одному
+                    // избранному отсекала целые паки — а именно ими и пользуются
                     java.util.Optional<Telegram.StickerRef> sticker = telegram.sticker(stickerId);
                     if (sticker.isEmpty()) {
-                        return "Cannot send that sticker. Call sticker_list first.";
+                        return "You don't have this sticker. Call sticker_list to see yours, "
+                                + "or sticker_pack to open a pack.";
                     }
                     Long replyTo = ru.rainedev.raine.core.Numbers.longAt(arguments, "reply_to_message_id")
                             .filter(id -> telegram.message(chatId, id).isPresent())
