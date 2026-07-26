@@ -25,7 +25,10 @@ public final class MessageContent {
             case TdApi.MessageAnimation animation -> withCaption("[гифка]", animation.caption);
             case TdApi.MessageVoiceNote voice -> withCaption("[голосовое]", voice.caption);
             case TdApi.MessageVideoNote ignored -> "[кружок]";
-            case TdApi.MessageSticker sticker -> "[стикер] " + sticker.sticker.emoji;
+            // id обязателен: без него стикер не забрать себе и не отправить потом,
+            // а взять его больше неоткуда — эмодзи стикер не опознаёт
+            case TdApi.MessageSticker sticker ->
+                    "[стикер sticker_id=%d] %s".formatted(sticker.sticker.id, sticker.sticker.emoji);
             case TdApi.MessageAudio audio -> withCaption("[аудио] " + audio.audio.title, audio.caption);
             case TdApi.MessageDocument document -> withCaption(
                     "[файл] " + (document.document.fileName.isEmpty() ? "без имени" : document.document.fileName),

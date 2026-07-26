@@ -45,6 +45,26 @@ class MediaInMessageTest {
     }
 
     @Test
+    void stickerCarriesItsIdSoItCanBeKeptAndSentLater() {
+        // sticker_save и sticker_send просят id, а взять его ей больше неоткуда:
+        // без него понравившийся стикер не забрать себе, и своих не появляется
+        TdApi.Message message = voiceMessage();
+        TdApi.MessageSticker content = new TdApi.MessageSticker();
+        content.sticker = new TdApi.Sticker();
+        content.sticker.id = 7_576_000_000_123L;
+        content.sticker.emoji = "🤣";
+        message.content = content;
+
+        MessageFormatter formatter = new MessageFormatter(id -> "John", MessageFormatter.ReplyLookup.NONE,
+                ignored -> "");
+
+        String result = formatter.format(message, view);
+
+        assertTrue(result.contains("7576000000123"), "id стикера должен быть виден: " + result);
+        assertTrue(result.contains("🤣"), result);
+    }
+
+    @Test
     void transcriptIsCleanedFromControlMarkers() {
         // расшифровка — это текст собеседника, он мог наговорить что угодно
         MessageFormatter formatter = new MessageFormatter(id -> "John", MessageFormatter.ReplyLookup.NONE,

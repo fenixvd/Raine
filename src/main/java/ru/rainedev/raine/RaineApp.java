@@ -297,7 +297,7 @@ public final class RaineApp implements AutoCloseable {
 
         Toolbox available = new Toolbox();
         available.add(tools.open(chatId));
-        loop.submit(new Notification(text, available));
+        loop.submit(new Notification(text, available, true));
         log.info("Уведомление о снимке поставлено в очередь");
     }
 

@@ -199,7 +199,18 @@ public final class NotificationLoop {
     public void process(Notification notification) {
         long startedAt = System.currentTimeMillis();
         long spentTokens = 0;
-        String text = openImmediately(notification).orElse(notification.text());
+        // «тебе написали» открытый чат заменяет собой: в нём и так всё видно.
+        // А вот «снимок готов, вот имя файла» в переписке не написано нигде —
+        // выбросив этот текст, мы оставили бы её ждать того, что уже случилось
+        String opened = openImmediately(notification).orElse("");
+        String text;
+        if (opened.isEmpty()) {
+            text = notification.text();
+        } else if (notification.ownText()) {
+            text = notification.text() + "\n\n" + opened;
+        } else {
+            text = opened;
+        }
         context.add(Message.user(text + "\nCurrent time: " + Instant.now() + " UTC"));
 
         boolean recallMemories = true;
