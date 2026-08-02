@@ -23,6 +23,13 @@ public final class DiaryMemory implements Memory {
     /** Сколько последних сообщений описывают «о чём сейчас речь». */
     private static final int CONTEXT_DEPTH = 3;
 
+    /**
+     * Сколько букв запроса переживает дорогу до модели эмбеддингов. Её предел —
+     * 8192 токена, на кириллице это примерно вдвое меньше букв, чем кажется,
+     * поэтому берём с запасом.
+     */
+    private static final int MAX_TOPIC_CHARS = 8_000;
+
     private final Diary diary;
     private final LlmClient llm;
     private volatile int maxLength;
@@ -118,14 +125,21 @@ public final class DiaryMemory implements Memory {
     /**
      * Запрос к памяти строится и по рассуждениям тоже, а не только по сказанному:
      * то, о чём она сейчас думает, точнее задаёт, что стоит вспомнить.
+     * <p>
+     * Длина ограничена, и обрезается начало: у модели эмбеддингов свой предел,
+     * а одно подробное описание фото или видео способно занять его целиком —
+     * тогда вектор не считается вовсе и не вспоминается ничего. Ближе к концу
+     * лежит то, о чём говорят прямо сейчас, поэтому хвост и оставляем.
      */
-    private static String topicOf(List<Message> context) {
+    static String topicOf(List<Message> context) {
         StringBuilder topic = new StringBuilder();
         for (Message message : context.subList(Math.max(0, context.size() - CONTEXT_DEPTH), context.size())) {
             append(topic, message.reasoningContent());
             append(topic, message.content());
         }
-        return topic.toString();
+        return topic.length() <= MAX_TOPIC_CHARS
+                ? topic.toString()
+                : topic.substring(topic.length() - MAX_TOPIC_CHARS);
     }
 
     private static void append(StringBuilder topic, String text) {

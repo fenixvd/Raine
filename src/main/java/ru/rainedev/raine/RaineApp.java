@@ -131,7 +131,7 @@ public final class RaineApp implements AutoCloseable {
             vision = new Vision(llm, prompts, config.vision().cacheDir(),
                     config.vision().model(), config.vision().cheapModel(), config.character().name());
             var hearing = new ru.rainedev.raine.speech.SpeechToText(config.hearing());
-            if (hearing.isAvailable() && ru.rainedev.raine.vision.VideoAudio.isAvailable()) {
+            if (hearing.isAvailable()) {
                 vision.hearing(hearing);
             }
             telegramMedia = new TelegramMedia(telegram, vision, () -> loop == null ? List.of() : loop.context());

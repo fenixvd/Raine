@@ -22,6 +22,13 @@ dependencies {
     implementation("com.fasterxml.jackson.core:jackson-databind:2.22.1")
     // чистый Java-порт libopus: голосовые кодируются без внешних программ
     implementation("io.github.jaredmdobson:concentus:1.0.2")
+    // Чистый Java-декодер AAC: звук из видео слышен без внешних программ.
+    // ВАЖНО: объявлен ДО jcodec и обязан там остаться. Внутри jcodec лежит своя
+    // копия того же jaad, только древняя, и она берёт верх, если оказывается
+    // в пути раньше. Молча: код собирается, кадры «декодируются», а на выходе
+    // ровная тишина. Форк выбран этот же по той же причине — у de.sfuhrm:jaad
+    // 0.8.7 (тоже потомок той древней версии) тишина ровно та же.
+    implementation("com.tianscar.javasound:jaad:0.9.4")
     // чистый Java-декодер видео: кадры извлекаются без внешних программ
     implementation("org.jcodec:jcodec:0.2.5")
     implementation("org.jcodec:jcodec-javase:0.2.5")

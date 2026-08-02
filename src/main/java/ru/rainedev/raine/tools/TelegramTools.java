@@ -776,15 +776,43 @@ public final class TelegramTools {
         return Tool.named("open_chat_by_id")
                 .describedAs("Opens a chat by its id. Use get_telegram_chats or search_chats to find the id. "
                         + "Opening another chat replaces the previously opened one.")
-                .requiredInteger("chat_id", "Id of the chat to open")
+                .requiredInteger("chat_id", "Id of the chat to open. Take it from get_telegram_chats "
+                        + "or search_chats — a message_id is a different thing and will not work here.")
                 .buildContextual((arguments, addTool) -> {
                     // два разных чата за один шаг — верный признак путаницы,
                     // и следом за этим сообщение уходит не тому
                     if (ru.rainedev.raine.core.CurrentStep.countOf("open_chat_by_id") > 1) {
                         return "You can only open one chat at a time. Open one, finish there, then move on.";
                     }
-                    return open(Numbers.longAt(arguments, "chat_id", 0)).handler().call(arguments, addTool);
+                    long chatId = Numbers.longAt(arguments, "chat_id", 0);
+                    try {
+                        return open(chatId).handler().call(arguments, addTool);
+                    } catch (RuntimeException e) {
+                        return notFound(e) ? noSuchChat(chatId) : rethrow(e);
+                    }
                 });
+    }
+
+    private static boolean notFound(RuntimeException e) {
+        return String.valueOf(e.getMessage()).toLowerCase().contains("chat not found");
+    }
+
+    private static String rethrow(RuntimeException e) {
+        throw e;
+    }
+
+    /**
+     * «Chat not found» — единственное, что она видела, и по этому ответу нельзя
+     * понять, что делать дальше: за месяц она одиннадцать раз пробовала открыть
+     * чат по числу, которое чатом не было (чаще всего — по message_id, они в
+     * разметке выглядят такими же длинными числами). Ответ должен говорить,
+     * где взять настоящий идентификатор.
+     */
+    static String noSuchChat(long chatId) {
+        log.info("Чат {} не найден — похоже, это не идентификатор чата", chatId);
+        return "There is no chat with id " + chatId + ". That number is not a chat id — a message_id, "
+                + "or an id you recalled from somewhere, will not work here. Find the chat first: "
+                + "search_chats by name, or get_telegram_chats to list them, and take chat_id from there.";
     }
 
     /** Пересылка — поделиться чужим постом, не пересказывая его. */

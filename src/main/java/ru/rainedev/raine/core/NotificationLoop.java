@@ -1,5 +1,7 @@
 package ru.rainedev.raine.core;
 
+import java.io.UncheckedIOException;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -27,6 +29,12 @@ public final class NotificationLoop {
     /** Страховка от зацикливания: живой ход столько шагов не занимает. */
     private static final int MAX_STEPS_PER_NOTIFICATION = 24;
 
+    /** Сколько раз возвращаться к уведомлению, пока не вернётся сеть. */
+    private static final int MAX_RETRIES = 5;
+
+    /** Пауза между такими возвращениями: сеть здесь пропадает на минуты, не на секунды. */
+    private Duration retryPause = Duration.ofSeconds(60);
+
     /** Сигнал «пора заканчивать»: кладётся в очередь, чтобы разбудить ожидание. */
     private static final Notification STOP = new Notification("", new Toolbox());
 
@@ -50,6 +58,9 @@ public final class NotificationLoop {
 
     private final LinkedBlockingDeque<Notification> queue = new LinkedBlockingDeque<>();
     private final List<Message> context = new ArrayList<>();
+
+    /** Сколько раз подряд текущее уведомление уже спотыкалось о пропавшую сеть. */
+    private int retries;
 
     private final LlmClient llm;
     private final SystemPrompt systemPrompt;
@@ -125,6 +136,11 @@ public final class NotificationLoop {
         this.idleCheck = howOften;
     }
 
+    /** Для проверок: сколько ждать, прежде чем вернуться к уведомлению. */
+    void retryPause(Duration pause) {
+        this.retryPause = pause;
+    }
+
     public void onNotificationDone(java.util.function.Consumer<Notification> action) {
         this.onNotificationDone.add(action);
     }
@@ -159,6 +175,8 @@ public final class NotificationLoop {
     /** Бесконечный цикл. Прерывается только остановкой потока. */
     public void run() {
         while (!Thread.currentThread().isInterrupted()) {
+            Notification taken = null;
+            int contextBefore = context.size();
             try {
                 if (rest != null) {
                     // отходит перед тем, как взяться за уведомление: накопившееся
@@ -178,7 +196,10 @@ public final class NotificationLoop {
                 if (notification == null) {
                     continue;
                 }
+                taken = notification;
+                contextBefore = context.size();
                 process(notification);
+                retries = 0;
                 notifyDone(notification);
                 onIdle.run();
             } catch (InterruptedException e) {
@@ -188,6 +209,9 @@ public final class NotificationLoop {
             } catch (RuntimeException e) {
                 if (Fatal.check(e)) {
                     return;
+                }
+                if (retryLater(taken, e, contextBefore)) {
+                    continue;
                 }
                 log.error("Не удалось обработать уведомление", e);
                 recoverFrom(e);
@@ -368,6 +392,43 @@ public final class NotificationLoop {
     }
 
     /** Повреждённый JSON означает испорченный контекст — его проще выбросить целиком. */
+    /**
+     * Пропавшая сеть не должна стоить ей сообщения.
+     * <p>
+     * Клиент уже пробовал трижды подряд; если сеть так и не вернулась, дальше
+     * долбиться незачем — уведомление кладётся обратно в начало очереди и ждёт.
+     * Написанное в этот заход из контекста убирается: иначе при следующей
+     * попытке то же самое сообщение легло бы в разговор дважды.
+     *
+     * @return взяли ли уведомление на новую попытку
+     */
+    private boolean retryLater(Notification notification, RuntimeException failure, int contextBefore) {
+        if (notification == null || !(failure instanceof UncheckedIOException)) {
+            return false;
+        }
+        if (++retries > MAX_RETRIES) {
+            log.error("Сеть не вернулась за {} попыток — уведомление отложено насовсем", MAX_RETRIES);
+            retries = 0;
+            return false;
+        }
+        while (context.size() > contextBefore) {
+            context.removeLast();
+        }
+        queue.addFirst(notification);
+        log.warn("Сеть недоступна, вернусь к уведомлению через {} с (попытка {} из {})",
+                retryPause.toSeconds(), retries, MAX_RETRIES);
+        sleep(retryPause);
+        return true;
+    }
+
+    private static void sleep(Duration pause) {
+        try {
+            Thread.sleep(pause);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
     private void recoverFrom(RuntimeException e) {
         String message = String.valueOf(e.getMessage()).toLowerCase();
         if (message.contains("json")) {

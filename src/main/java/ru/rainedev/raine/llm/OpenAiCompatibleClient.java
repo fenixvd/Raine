@@ -45,6 +45,9 @@ public final class OpenAiCompatibleClient implements LlmClient {
             .build();
 
     private final Config.Llm config;
+    /** Предел модели эмбеддингов — 8192 токена; на кириллице это заметно меньше букв. */
+    private static final int MAX_EMBEDDING_CHARS = 8_000;
+
     private final String embeddingModel;
 
     public OpenAiCompatibleClient(Config.Llm config, String embeddingModel) {
@@ -118,7 +121,7 @@ public final class OpenAiCompatibleClient implements LlmClient {
         ObjectNode body = mapper.createObjectNode();
         body.put("model", embeddingModel);
         // пустую строку эндпоинт не принимает, а пустой текст встречается
-        body.put("input", input == null || input.isBlank() ? " " : input);
+        body.put("input", input == null || input.isBlank() ? " " : trimmed(input));
 
         String response = post("embeddings", body, Duration.ofMinutes(2));
         try {
@@ -134,6 +137,21 @@ public final class OpenAiCompatibleClient implements LlmClient {
         } catch (IOException e) {
             throw new UncheckedIOException("Не удалось разобрать эмбеддинг", e);
         }
+    }
+
+    /**
+     * У модели эмбеддингов свой предел длины, и превышение она встречает
+     * отказом, а не усечением: вектор не считается, и на той стороне просто
+     * ничего не вспоминается. Лучше посчитать вектор по началу текста,
+     * чем не посчитать вовсе.
+     */
+    private static String trimmed(String input) {
+        if (input.length() <= MAX_EMBEDDING_CHARS) {
+            return input;
+        }
+        log.debug("Текст для вектора длиннее допустимого, обрезан: {} → {} символов",
+                input.length(), MAX_EMBEDDING_CHARS);
+        return input.substring(0, MAX_EMBEDDING_CHARS);
     }
 
     private String post(String path, ObjectNode body, Duration timeout) {
