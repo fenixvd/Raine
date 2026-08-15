@@ -30,6 +30,21 @@ public final class Vision {
     /** Меньше этого — не картинка, а недокачанный файл. */
     private static final int MIN_IMAGE_BYTES = 512;
 
+    /**
+     * Отказ смотреть — не описание. Беда в том, что он непустой и потому шёл
+     * дальше как обычный ответ: оседал в кэше навсегда (значит, картинку уже
+     * никогда не переспросят), уходил в разговор как увиденное и попадал
+     * в дневник. Из одной такой записи она вывела, что не умеет смотреть видео.
+     * <p>
+     * Смотрим только начало ответа: описание начинается с заголовка, а отказ —
+     * сразу с извинения. Иначе «I can't» внутри подписи к картинке считалось бы
+     * отказом, и настоящее описание пропадало бы.
+     */
+    private static final java.util.regex.Pattern REFUSAL = java.util.regex.Pattern.compile(
+            "^\\W*(?:i(?:'m| am)?\\s+(?:sorry|unable|afraid)|i\\s+can(?:'t|not)|sorry[,.]|as an ai"
+                    + "|извини|прост(?:и|ите)|я не могу|не могу (?:помочь|описать))",
+            java.util.regex.Pattern.CASE_INSENSITIVE);
+
     /** Что смотрим. От этого зависит и промпт, и какой моделью. */
     public enum Kind {
         /** Присланное фото — важно разглядеть, берём основную модель. */
@@ -84,6 +99,10 @@ public final class Vision {
         try {
             String description = llm.describeImage(kind.cheap ? cheapModel : mainModel,
                     prompts.load(kind.prompt), buildContext(context), Downscale.toFit(image));
+            if (refusal(description)) {
+                log.info("Смотреть отказались: {}", description.strip().lines().findFirst().orElse(""));
+                return "";
+            }
             return description == null || description.isBlank() ? "" : wrap(kind, description.strip());
         } catch (RuntimeException e) {
             log.warn("Не удалось разглядеть кадры: {}", e.getMessage());
@@ -207,6 +226,12 @@ public final class Vision {
         for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
             try {
                 String caption = llm.describeImage(cheapModel, prompt, situation, Downscale.toFit(frame.jpeg()));
+                if (refusal(caption)) {
+                    // кадр без подписи выпадет из ленты времени, и это честнее
+                    // извинения, выданного за увиденное
+                    log.debug("Кадр на {} с смотреть отказались, попытка {}", frame.from(), attempt);
+                    continue;
+                }
                 if (caption != null && !caption.isBlank()) {
                     return caption.strip();
                 }
@@ -246,11 +271,20 @@ public final class Vision {
             return "";
         }
 
-        String model = kind.cheap ? cheapModel : mainModel;
         for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+            // на последней попытке дешёвую модель сменяет основная: дешёвая
+            // отказывается заметно чаще, а переспрашивать её тем же самым —
+            // получать тот же отказ
+            String model = kind.cheap && attempt < MAX_ATTEMPTS ? cheapModel : mainModel;
             try {
                 String description = llm.describeImage(model, prompts.load(kind.prompt), buildContext(context),
                         Downscale.toFit(image));
+                if (refusal(description)) {
+                    // в кэш не кладём: иначе отказ станет вечным описанием картинки
+                    log.info("Смотреть отказались ({}), попытка {} из {}: {}", model, attempt, MAX_ATTEMPTS,
+                            description.strip().lines().findFirst().orElse(""));
+                    continue;
+                }
                 if (description != null && !description.isBlank()) {
                     toCache(file, description.strip());
                     log.info("Разглядела {}: {}", kind.tag, description.strip().lines().findFirst().orElse(""));
@@ -283,6 +317,13 @@ public final class Vision {
             }
         }
         return out.append("</context>\n\nDescribe the photo.").toString();
+    }
+
+    /**
+     * @return правда, если модель не посмотрела, а извинилась
+     */
+    static boolean refusal(String answer) {
+        return answer != null && REFUSAL.matcher(answer.strip()).find();
     }
 
     private static String wrap(Kind kind, String description) {

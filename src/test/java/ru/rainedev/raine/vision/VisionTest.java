@@ -203,6 +203,83 @@ class VisionTest {
     }
 
     @Test
+    void refusalIsNotADescription() {
+        // все пять формулировок взяты из кэша описаний живого бота
+        assertTrue(Vision.refusal("I'm unable to assist with that."));
+        assertTrue(Vision.refusal("I'm sorry, but I can't assist with that."));
+        assertTrue(Vision.refusal("I'm sorry, I can't assist with that."));
+        assertTrue(Vision.refusal("I'm unable to view images directly. However, if you provide me with details…"));
+        assertTrue(Vision.refusal("I'm unable to identify or provide descriptions for this image."));
+    }
+
+    @Test
+    void descriptionThatMerelyMentionsAnApologyIsKept() {
+        // отказ узнаётся по началу ответа: «sorry» внутри подписи — это подпись
+        assertFalse(Vision.refusal("- **Title:** Мем с надписью «Sorry, I can't do that»"));
+        assertFalse(Vision.refusal("- **Title:** Человек с котом на руках"));
+    }
+
+    @Test
+    void refusalIsNotRememberedAndTheImageIsAskedAboutAgain(@TempDir Path dir) throws IOException {
+        // отказ непустой, и раньше он оседал в кэше навсегда: картинку больше
+        // никогда не переспрашивали, а в разговор уходило извинение
+        ScriptedLlm llm = new ScriptedLlm()
+                .willSee("I'm sorry, but I can't assist with that.")
+                .willSee("Человек с котом на руках");
+
+        String result = visionWith(llm, dir.resolve("cache")).describe(
+                imageFile(dir, "photo.jpg"), Vision.Kind.PHOTO, List.of());
+
+        assertTrue(result.contains("Человек с котом"), result);
+        assertFalse(result.contains("sorry"), "извинение не должно уйти в разговор: " + result);
+        assertEquals(2, llm.seen.get(), "после отказа надо переспросить");
+    }
+
+    @Test
+    void stubbornRefusalLeavesNothingBehind(@TempDir Path dir) throws IOException {
+        ScriptedLlm llm = new ScriptedLlm()
+                .willSee("I'm unable to assist with that.")
+                .willSee("I'm unable to assist with that.")
+                .willSee("I'm unable to assist with that.");
+        Path photo = imageFile(dir, "photo.jpg");
+        Vision vision = visionWith(llm, dir.resolve("cache"));
+
+        assertEquals("", vision.describe(photo, Vision.Kind.PHOTO, List.of()));
+
+        // в кэш отказ не лёг, поэтому в следующий раз картинку смотрят заново
+        llm.willSee("Человек с котом на руках");
+        assertTrue(vision.describe(photo, Vision.Kind.PHOTO, List.of()).contains("Человек с котом"));
+    }
+
+    @Test
+    void cheapModelThatKeepsRefusingIsReplacedByTheMainOne(@TempDir Path dir) throws IOException {
+        // переспрашивать дешёвую модель тем же самым — получать тот же отказ
+        ScriptedLlm llm = new ScriptedLlm()
+                .willSee("I'm sorry, I can't assist with that.")
+                .willSee("I'm sorry, I can't assist with that.")
+                .willSee("Кот машет лапой");
+
+        String result = visionWith(llm, dir.resolve("cache")).describe(
+                imageFile(dir, "sticker.webp"), Vision.Kind.STICKER, List.of());
+
+        assertTrue(result.contains("Кот машет лапой"), result);
+        assertEquals("основная-модель", llm.lastModel, "последняя попытка — основной моделью");
+    }
+
+    @Test
+    void refusedFrameFallsOutOfTheTimeline(@TempDir Path dir) {
+        ScriptedLlm llm = new ScriptedLlm().willSee("кот сидит").willSee("I'm unable to assist with that.");
+
+        String result = visionWith(llm, dir.resolve("cache")).describeVideo(
+                List.of(new VideoFrames.Frame(0, 1, new byte[] {1}),
+                        new VideoFrames.Frame(1, 2, new byte[] {2})),
+                List.of());
+
+        assertTrue(result.contains("кот сидит"), result);
+        assertFalse(result.contains("unable"), "извинение не должно попасть в ленту времени: " + result);
+    }
+
+    @Test
     void missingFileDoesNotBreakTheConversation(@TempDir Path dir) {
         ScriptedLlm llm = new ScriptedLlm().willSee("описание");
 
