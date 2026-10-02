@@ -221,7 +221,7 @@ public final class RaineApp implements AutoCloseable {
             try {
                 // сначала средняя память: ей нужен ещё не урезанный разговор
                 workingMemory.update(prompts.system(""), loop.context());
-                writer.save(prompts.system(""), loop.context());
+                writer.saveStrict(prompts.system(""), loop.context());
             } catch (RuntimeException e) {
                 // чаще всего это оборванная сеть на остановке: пересказ делает
                 // модель, а её нет. Разговор откладывается сырым и разбирается
@@ -237,6 +237,8 @@ public final class RaineApp implements AutoCloseable {
 
         // ход закончен — выходим из чатов, в которые заходили
         loop.onNotificationDone(done -> tools.closeOpened());
+        loop.onNotificationFailed((notification, failure) ->
+                pending.keepFailure(notification.text(), loop.context(), String.valueOf(failure.getMessage())));
 
         rest = new Rest(random);
         loop.rest(rest);
@@ -269,13 +271,19 @@ public final class RaineApp implements AutoCloseable {
                     night.bedtime().toLocalTime().withSecond(0), night.wakeTime().toLocalTime().withSecond(0));
         }
 
-        if (config.sleepConsolidation()) {
-            var consolidation = new ru.rainedev.raine.memory.SleepConsolidation(
+        rest.duringNight((duration, wokeUp) -> {
+            Config fresh = settings.current();
+            if (!fresh.sleepConsolidation()) return;
+            var limits = fresh.consolidation();
+            var bounded = new ru.rainedev.raine.memory.SleepConsolidation(
                     diary, llm, prompts.lazy("sleep_consolidator.md"),
-                    config.diaryDir().resolve("archive"), config.diaryConsolidationBudget(), random);
-            rest.duringNight(consolidation::run);
-            log.info("Пересмотр памяти во сне включён");
-        }
+                    config.diaryDir().resolve("archive"), fresh.diaryConsolidationBudget(), random,
+                    limits.maxRequests(), limits.maxTokens());
+            bounded.run(duration.compareTo(java.time.Duration.ofMinutes(limits.minutes())) < 0
+                    ? duration : java.time.Duration.ofMinutes(limits.minutes()),
+                    () -> wokeUp.getAsBoolean() || !settings.current().sleepConsolidation());
+        });
+        log.info("Пересмотр памяти во сне: {}", config.sleepConsolidation() ? "включён" : "выключен");
 
         spontaneity = new Spontaneity(loop, diary, always, random);
         spontaneity.asleepWhen(rest::isResting);
@@ -302,11 +310,11 @@ public final class RaineApp implements AutoCloseable {
         for (java.nio.file.Path file : pending.waiting()) {
             var conversation = pending.read(file);
             if (conversation.isEmpty()) {
-                pending.done(file);   // читать нечего, держать незачем
+                log.warn("Отложенный разговор {} пуст или повреждён — оставляю для проверки", file.getFileName());
                 continue;
             }
             try {
-                int saved = writer.save(systemPrompt, conversation).size();
+                int saved = writer.saveStrict(systemPrompt, conversation).size();
                 pending.done(file);
                 log.info("Отложенный разговор {} пересказан, записей: {}", file.getFileName(), saved);
             } catch (RuntimeException e) {

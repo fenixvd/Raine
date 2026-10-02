@@ -40,19 +40,36 @@ public final class OpenAiCompatibleClient implements LlmClient {
     private final String sessionId = java.util.UUID.randomUUID().toString();
 
     private final ObjectMapper mapper = new ObjectMapper();
-    private final HttpClient http = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(30))
-            .build();
+    @FunctionalInterface
+    interface Sender {
+        HttpResponse<String> send(HttpRequest request) throws IOException, InterruptedException;
+    }
+
+    private final Sender sender;
+    private final java.util.function.Consumer<Duration> pause;
 
     private final Config.Llm config;
+    private volatile LlmFailure blocked;
     /** Предел модели эмбеддингов — 8192 токена; на кириллице это заметно меньше букв. */
     private static final int MAX_EMBEDDING_CHARS = 8_000;
 
     private final String embeddingModel;
 
     public OpenAiCompatibleClient(Config.Llm config, String embeddingModel) {
+        this(config, embeddingModel, defaultSender(), OpenAiCompatibleClient::sleep);
+    }
+
+    OpenAiCompatibleClient(Config.Llm config, String embeddingModel, Sender sender,
+                           java.util.function.Consumer<Duration> pause) {
         this.config = config;
         this.embeddingModel = embeddingModel;
+        this.sender = sender;
+        this.pause = pause;
+    }
+
+    private static Sender defaultSender() {
+        HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(30)).build();
+        return request -> http.send(request, HttpResponse.BodyHandlers.ofString());
     }
 
     @Override
@@ -155,6 +172,8 @@ public final class OpenAiCompatibleClient implements LlmClient {
     }
 
     private String post(String path, ObjectNode body, Duration timeout) {
+        LlmFailure unavailable = blocked;
+        if (unavailable != null) throw unavailable;
         HttpRequest request;
         try {
             request = HttpRequest.newBuilder(URI.create(baseUrl() + path))
@@ -171,17 +190,23 @@ public final class OpenAiCompatibleClient implements LlmClient {
         RuntimeException lastFailure = null;
         for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
             try {
-                HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
+                HttpResponse<String> response = sender.send(request);
                 if (response.statusCode() / 100 == 2) {
                     return response.body();
                 }
-                // 4xx повторять бессмысленно — запрос не станет корректнее сам по себе
-                if (response.statusCode() / 100 == 4) {
-                    throw new IllegalStateException(
-                            "Модель отвергла запрос (%d): %s".formatted(response.statusCode(), response.body()));
-                }
-                lastFailure = new IllegalStateException(
+                LlmFailure failure = new LlmFailure(response.statusCode(),
                         "Ошибка эндпоинта (%d): %s".formatted(response.statusCode(), response.body()));
+                if (!failure.retryable()) {
+                    if (failure.requiresOperator()) blocked = failure;
+                    throw failure;
+                }
+                lastFailure = failure;
+                if (attempt < MAX_ATTEMPTS) {
+                    Duration delay = retryDelay(response.headers().firstValue("Retry-After").orElse(""), attempt);
+                    log.warn("Эндпоинт {}, повтор через {} с", response.statusCode(), delay.toSeconds());
+                    pause.accept(delay);
+                    continue;
+                }
             } catch (IOException e) {
                 lastFailure = new UncheckedIOException("Сеть недоступна", e);
             } catch (InterruptedException e) {
@@ -191,10 +216,22 @@ public final class OpenAiCompatibleClient implements LlmClient {
 
             if (attempt < MAX_ATTEMPTS) {
                 log.warn("Попытка {} из {} не удалась: {}", attempt, MAX_ATTEMPTS, lastFailure.getMessage());
-                sleep(Duration.ofSeconds(2L * attempt));
+                pause.accept(Duration.ofSeconds(2L * attempt));
             }
         }
         throw lastFailure;
+    }
+
+    static Duration retryDelay(String header, int attempt) {
+        long seconds = 2L * attempt;
+        try { seconds = Math.max(seconds, Long.parseLong(header.strip())); }
+        catch (NumberFormatException ignored) {
+            try {
+                var date = java.time.ZonedDateTime.parse(header, java.time.format.DateTimeFormatter.RFC_1123_DATE_TIME);
+                seconds = Math.max(seconds, Duration.between(java.time.Instant.now(), date.toInstant()).toSeconds());
+            } catch (java.time.format.DateTimeParseException invalid) { /* use backoff */ }
+        }
+        return Duration.ofSeconds(Math.clamp(seconds, 1, 3600));
     }
 
     private String baseUrl() {

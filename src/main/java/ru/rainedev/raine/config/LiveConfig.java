@@ -33,12 +33,32 @@ public final class LiveConfig implements AutoCloseable {
     private final ScheduledExecutorService watcher =
             Executors.newSingleThreadScheduledExecutor(Thread.ofVirtual().name("raine-config").factory());
 
+    private final Config initial;
     private volatile Config current;
+    private volatile List<String> restartRequired = List.of();
+
+    public List<String> restartRequired() { return restartRequired; }
+
+    static List<String> restartChanges(Config initial, Config fresh) {
+        var changes = new java.util.ArrayList<String>();
+        var hot = java.util.Set.of("lockdown", "lockdownAllowChannels", "behaviour", "repeat",
+                "diaryInjectionMaxLength", "diaryMinRelatedness", "llmTranscript", "sleepConsolidation",
+                "consolidation", "diaryConsolidationBudget");
+        for (var component : Config.class.getRecordComponents()) {
+            if (hot.contains(component.getName())) continue;
+            try {
+                if (!java.util.Objects.equals(component.getAccessor().invoke(initial), component.getAccessor().invoke(fresh)))
+                    changes.add(component.getName());
+            } catch (ReflectiveOperationException e) { throw new IllegalStateException(e); }
+        }
+        return List.copyOf(changes);
+    }
     private volatile long seenAt;
 
     public LiveConfig(Path file, Config initial) {
         this.file = file;
         this.current = initial;
+        this.initial = initial;
         this.seenAt = changedAt();
     }
 
@@ -79,6 +99,8 @@ public final class LiveConfig implements AutoCloseable {
         // же проверка увидела бы «правку» и всё началось бы заново
         seenAt = changedAt();
         current = reloaded;
+        restartRequired = restartChanges(initial, reloaded);
+        if (!restartRequired.isEmpty()) log.warn("Для применения настроек нужен перезапуск: {}", restartRequired);
         listeners.forEach(listener -> {
             try {
                 listener.accept(reloaded);

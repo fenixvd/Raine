@@ -44,6 +44,15 @@ public final class DiaryWriter {
 
     /** @return сохранённые записи; пусто, если сохранять оказалось нечего */
     public List<DiaryEntry> save(String systemPrompt, List<Message> context) {
+        return save(systemPrompt, context, false);
+    }
+
+    /** A failed summary must leave the original conversation available for another attempt. */
+    public List<DiaryEntry> saveStrict(String systemPrompt, List<Message> context) {
+        return save(systemPrompt, context, true);
+    }
+
+    private List<DiaryEntry> save(String systemPrompt, List<Message> context, boolean strict) {
         if (context.isEmpty()) {
             return List.of();
         }
@@ -51,7 +60,12 @@ public final class DiaryWriter {
         String summary = askForSummary(systemPrompt, context);
         if (summary.isBlank()) {
             log.warn("Пересказ разговора не получен — записи не сохранены");
+            if (strict) throw new IllegalStateException("Пересказ не получен, исходный разговор нужно сохранить");
             return List.of();
+        }
+        if (strict && Arrays.stream(summary.replace("- --", SEPARATOR).replace("-- -", SEPARATOR)
+                .split(SEPARATOR)).noneMatch(part -> part.strip().length() >= MIN_ENTRY_LENGTH)) {
+            throw new IllegalStateException("Пересказ слишком короткий, исходный разговор нужно сохранить");
         }
         return persist(summary);
     }
@@ -93,8 +107,7 @@ public final class DiaryWriter {
             try {
                 embedding = llm.embedding(part);
             } catch (RuntimeException e) {
-                log.warn("Не удалось посчитать вектор записи, пропускаю: {}", e.getMessage());
-                continue;
+                throw new IllegalStateException("Не удалось сохранить весь пересказ: ошибка эмбеддинга", e);
             }
             if (isPlagiarism(embedding, part)) {
                 continue;

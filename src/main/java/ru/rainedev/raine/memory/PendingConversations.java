@@ -39,12 +39,30 @@ public final class PendingConversations {
         }
         try {
             Files.createDirectories(dir);
-            Path file = dir.resolve(System.currentTimeMillis() + ".json");
-            MAPPER.writerWithDefaultPrettyPrinter().writeValue(file.toFile(), conversation);
+            Path file = dir.resolve(System.currentTimeMillis() + "-" + java.util.UUID.randomUUID() + ".json");
+            ru.rainedev.raine.storage.AtomicFiles.writeString(file,
+                    MAPPER.writerWithDefaultPrettyPrinter().writeValueAsString(conversation));
             log.info("Разговор отложен до лучшей связи: {}", file.getFileName());
         } catch (IOException | RuntimeException e) {
             // дальше спасать нечем: этот разговор действительно потерян
             log.error("Разговор не удалось отложить", e);
+            throw new IllegalStateException("Исходный разговор не удалось сохранить", e);
+        }
+    }
+
+    public void keepFailure(String notification, List<Message> context, String reason) {
+        try {
+            Path file = dir.resolve("failed-notifications").resolve(System.currentTimeMillis()
+                    + "-" + java.util.UUID.randomUUID() + ".json");
+            var data = MAPPER.createObjectNode();
+            data.put("notification", notification);
+            data.put("reason", reason);
+            data.set("context", MAPPER.valueToTree(context));
+            ru.rainedev.raine.storage.AtomicFiles.writeString(file,
+                    MAPPER.writerWithDefaultPrettyPrinter().writeValueAsString(data));
+            log.warn("Необработанное уведомление сохранено: {}", file);
+        } catch (IOException failure) {
+            throw new java.io.UncheckedIOException("Не удалось сохранить уведомление", failure);
         }
     }
 

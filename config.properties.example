@@ -215,3 +215,8 @@ anti_repeat_trigger_avg=0.85
 
 # сколько своих реплик держать для сравнения
 anti_repeat_max_history=32
+
+# Лимиты одной ночной переработки; учитываются ответы модели и запросы эмбеддингов.
+sleep_consolidation_minutes=30
+sleep_consolidation_max_requests=20
+sleep_consolidation_max_tokens=100000

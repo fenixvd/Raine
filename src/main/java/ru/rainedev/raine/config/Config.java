@@ -35,6 +35,7 @@ public record Config(
         String lockdown,
         boolean lockdownAllowChannels,
         boolean sleepConsolidation,
+        Consolidation consolidation,
         Night night,
         Around around,
         int noticeDelaySeconds,
@@ -45,6 +46,13 @@ public record Config(
 ) {
 
     /** Параметры OpenAI-совместимого эндпоинта. */
+    public record Consolidation(int minutes, int maxRequests, long maxTokens) {
+        public Consolidation {
+            if (minutes < 1 || maxRequests < 1 || maxTokens < 1)
+                throw new IllegalArgumentException("Лимиты консолидации должны быть положительными");
+        }
+    }
+
     public record Llm(String baseUrl, String model, String apiKey, double temperature) {}
 
     /**
@@ -200,6 +208,10 @@ public record Config(
                 s.get("lockdown", "owner_only", "круг общения: owner_only, contacts, everyone"),
                 s.flag("lockdown_allow_channels", true, "читать ли каналы при суженном круге общения"),
                 s.flag("sleep_consolidation", false, "пересматривать ли память во сне"),
+                new Consolidation(
+                        s.integer("sleep_consolidation_minutes", 30, "предел минут на пересмотр за ночь"),
+                        s.integer("sleep_consolidation_max_requests", 20, "предел запросов: ответы и эмбеддинги за ночь"),
+                        s.number("sleep_consolidation_max_tokens", 100000, "предел токенов ответов и подсказок за ночь")),
                 new Night(
                         s.flag("night_sleep", true, "спит ли она ночью"),
                         s.time("night_bedtime_from", "23:00", "не раньше этого времени ложится"),

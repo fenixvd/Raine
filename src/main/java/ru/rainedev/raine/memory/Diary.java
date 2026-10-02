@@ -49,7 +49,7 @@ public final class Diary {
         reload();
     }
 
-    public void embedder(Embedder embedder) {
+    public synchronized void embedder(Embedder embedder) {
         this.embedder = embedder;
     }
 
@@ -57,16 +57,16 @@ public final class Diary {
         return dir;
     }
 
-    public int size() {
+    public synchronized int size() {
         return entries.size();
     }
 
-    public boolean isEmpty() {
+    public synchronized boolean isEmpty() {
         return entries.isEmpty();
     }
 
     /** Перечитывает каталог. Битые файлы пропускаются, а не роняют запуск. */
-    public void reload() {
+    public synchronized void reload() {
         entries.clear();
         if (!Files.isDirectory(dir)) {
             log.info("Каталог дневника {} пуст — память начинается с нуля", dir);
@@ -132,7 +132,7 @@ public final class Diary {
      *               всё равно не с чем, а обращений к сети выходит по числу
      *               записей
      */
-    public List<Match> query(double[] vector) {
+    public synchronized List<Match> query(double[] vector) {
         List<Match> matches = new ArrayList<>(entries.size());
         for (DiaryEntry entry : List.copyOf(entries.values())) {
             DiaryEntry ready = vector.length == 0 ? entry : withEmbedding(entry, vector.length);
@@ -157,8 +157,8 @@ public final class Diary {
             // табуляции ломали разбор ответа эндпоинта
             double[] embedding = embedder.embed(entry.body().replace("\t", "  "));
             DiaryEntry updated = new DiaryEntry(entry.id(), entry.body(), embedding, entry.metadata());
-            entries.put(updated.id(), updated);
             write(updated);
+            entries.put(updated.id(), updated);
             log.info("Досчитан вектор для записи {}", updated.id());
             return updated;
         } catch (RuntimeException e) {
@@ -172,7 +172,7 @@ public final class Diary {
      * из выдачи. Пока контекст не сброшен, та же запись повторно не всплывёт —
      * иначе она жевалась бы по кругу, занимая место.
      */
-    public DiaryEntry take(Match match) {
+    public synchronized DiaryEntry take(Match match) {
         DiaryEntry updated = use(match);
         entries.remove(updated.id());
         return updated;
@@ -183,16 +183,16 @@ public final class Diary {
      * Так поступает поиск по запросу: там от повторов защищаются в пределах
      * одного запроса, а насовсем прятать запись незачем.
      */
-    public DiaryEntry use(Match match) {
+    public synchronized DiaryEntry use(Match match) {
         DiaryEntry updated = match.entry()
                 .withMetadata(match.entry().metadata().used(match.relatedness(), Instant.now().toString()));
-        entries.put(updated.id(), updated);
         write(updated);
+        entries.put(updated.id(), updated);
         return updated;
     }
 
     /** Новая запись. Идентификатор — время создания, как и у прежних. */
-    public DiaryEntry save(String body, double[] embedding) {
+    public synchronized DiaryEntry save(String body, double[] embedding) {
         return save(body, embedding, 0);
     }
 
@@ -200,7 +200,7 @@ public final class Diary {
      * @param confidence насколько записи доверять: -1 ложь, 0 предположение,
      *                   1 установленный факт. Пересматривается во сне
      */
-    public DiaryEntry save(String body, double[] embedding, double confidence) {
+    public synchronized DiaryEntry save(String body, double[] embedding, double confidence) {
         long id = Instant.now().getEpochSecond();
         while (Files.exists(dir.resolve(id + ".md"))) {
             id++;
@@ -224,7 +224,7 @@ public final class Diary {
         }
         try {
             Files.createDirectories(dir);
-            Files.writeString(dir.resolve(entry.id() + ".md"),
+            ru.rainedev.raine.storage.AtomicFiles.writeString(dir.resolve(entry.id() + ".md"),
                     SEPARATOR + "\n" + MAPPER.writeValueAsString(meta) + "\n" + SEPARATOR + "\n\n"
                             + entry.body() + "\n");
         } catch (IOException e) {

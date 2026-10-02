@@ -51,6 +51,18 @@ public final class SleepConsolidation {
     private final Path archive;
     private final int maxBodyLength;
     private final RandomGenerator random;
+    private final int maxRequests;
+    private final long maxTokens;
+    private int requests;
+    private long tokens;
+    private Instant deadline;
+    private BooleanSupplier interrupted;
+
+    private boolean allowed() {
+        return requests < maxRequests && tokens < maxTokens
+                && Instant.now().isBefore(deadline) && !interrupted.getAsBoolean()
+                && !Thread.currentThread().isInterrupted();
+    }
 
     public SleepConsolidation(Diary diary, LlmClient llm, String prompt, Path archive,
                               int maxBodyLength, RandomGenerator random) {
@@ -59,6 +71,14 @@ public final class SleepConsolidation {
 
     public SleepConsolidation(Diary diary, LlmClient llm, java.util.function.Supplier<String> prompt, Path archive,
                               int maxBodyLength, RandomGenerator random) {
+        this(diary, llm, prompt, archive, maxBodyLength, random, 20, 100_000);
+    }
+
+    public SleepConsolidation(Diary diary, LlmClient llm, java.util.function.Supplier<String> prompt, Path archive,
+                              int maxBodyLength, RandomGenerator random, int maxRequests, long maxTokens) {
+        if (maxRequests < 1 || maxTokens < 1) throw new IllegalArgumentException("Limits must be positive");
+        this.maxRequests = maxRequests;
+        this.maxTokens = maxTokens;
         this.diary = diary;
         this.llm = llm;
         this.prompt = prompt;
@@ -72,37 +92,23 @@ public final class SleepConsolidation {
      * @param wokeUp   если вернёт true, работа прекращается: её позвали
      */
     public void run(Duration budget, BooleanSupplier wokeUp) {
+        if (budget.isZero() || budget.isNegative() || wokeUp.getAsBoolean()) return;
+        requests = 0;
+        tokens = 0;
+        deadline = Instant.now().plus(budget);
+        interrupted = wokeUp;
         diary.reload();
         if (diary.isEmpty()) {
             return;
         }
 
         // работаем со снимком: записи выбывают по мере пересмотра
-        List<DiaryEntry> pending = new ArrayList<>(diary.query(new double[0]).stream().map(Diary.Match::entry).toList());
+        List<DiaryEntry> pending = new ArrayList<>(diary.query(new double[0]).stream().map(Diary.Match::entry)
+                .filter(entry -> entry.metadata().confidence() < FACT).toList());
         pending.sort((a, b) -> b.id().compareTo(a.id()));
 
-        Instant deadline = Instant.now().plus(budget);
         int reviewed = 0;
-        int reviewedThisRound = 0;
-
-        while (Instant.now().isBefore(deadline) && !wokeUp.getAsBoolean()) {
-            if (pending.isEmpty()) {
-                // дневник пройден весь, а ночь ещё не кончилась — заходим на второй
-                // круг: за долгую ночь память пересматривается глубже, за короткую
-                // не успевает и первого. Круг, не изменивший ничего, — последний:
-                // дальше повторять нечего, и остаток ночи проходит спокойно
-                if (reviewedThisRound == 0) {
-                    break;
-                }
-                reviewedThisRound = 0;
-                diary.reload();
-                pending.addAll(diary.query(new double[0]).stream().map(Diary.Match::entry).toList());
-                pending.sort((a, b) -> b.id().compareTo(a.id()));
-                if (pending.size() <= 1) {
-                    break;   // сводить нечего
-                }
-                log.info("Дневник пройден целиком, начинаю заново");
-            }
+        while (!pending.isEmpty() && allowed()) {
             DiaryEntry target = take(pending);
             List<DiaryEntry> group = gather(target, pending);
 
@@ -112,10 +118,14 @@ public final class SleepConsolidation {
             if (rewritten.isEmpty()) {
                 continue;
             }
-            int saved = store(rewritten);
+            StoreResult stored = store(rewritten);
+            if (!stored.complete()) {
+                log.warn("Пересмотр не сохранён полностью — исходные записи остаются активными");
+                break;
+            }
+            int saved = stored.saved();
             retire(group);
             reviewed += group.size();
-            reviewedThisRound += group.size();
             log.info("Во сне пересмотрено {} записей, на их месте {}", group.size(), saved);
         }
 
@@ -142,7 +152,7 @@ public final class SleepConsolidation {
                 break;
             }
             DiaryEntry related = match.entry();
-            if (related.id().equals(target.id()) || !pending.remove(related)) {
+            if (related.id().equals(target.id()) || related.metadata().confidence() >= FACT || !pending.remove(related)) {
                 continue;
             }
             group.add(related);
@@ -163,7 +173,11 @@ public final class SleepConsolidation {
 
         for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
             try {
-                String answer = llm.chat(prompt.get(), List.of(Message.user(body.toString())), null).text();
+                if (!allowed()) return "";
+                requests++;
+                var response = llm.chat(prompt.get(), List.of(Message.user(body.toString())), null);
+                tokens += response.totalTokens();
+                String answer = response.text();
                 if (answer != null && !answer.isBlank() && !ModelText.looksLikeToolCall(answer)) {
                     return answer;
                 }
@@ -174,41 +188,56 @@ public final class SleepConsolidation {
         return "";
     }
 
-    private int store(String answer) {
-        int saved = 0;
-        for (String chunk : answer.split("\n---")) {
-            String text = chunk.strip();
-            if (text.length() < MIN_ENTRY_LENGTH) {
-                continue;
-            }
-            double confidence = 0;
-            int metaEnd = text.indexOf('}');
-            if (text.startsWith("{") && metaEnd > 0) {
-                try {
-                    JsonNode meta = MAPPER.readTree(text.substring(0, metaEnd + 1));
-                    confidence = meta.path("confidence").asDouble(0);
-                } catch (IOException ignored) {
-                    // без метаданных запись всё равно ценна
+    private record Replacement(String text, double confidence, double[] embedding) {}
+    private record StoreResult(int saved, boolean complete) {}
+
+    private StoreResult store(String answer) {
+        List<Replacement> replacements = new ArrayList<>();
+        boolean explicitForget = false;
+        // Validate the entire answer and compute every embedding before writing anything.
+        try {
+            for (String chunk : answer.split("\n---")) {
+                String text = chunk.strip();
+                if (text.isEmpty()) continue;
+                double confidence = 0;
+                if (text.startsWith("{")) {
+                    int end = text.indexOf('}');
+                    if (end < 0) return new StoreResult(0, false);
+                    JsonNode meta = MAPPER.readTree(text.substring(0, end + 1));
+                    if (!meta.path("confidence").isNumber()) return new StoreResult(0, false);
+                    confidence = meta.path("confidence").asDouble();
+                    if (!Double.isFinite(confidence)) return new StoreResult(0, false);
+                    text = text.substring(end + 1).strip();
                 }
-                text = text.substring(metaEnd + 1).strip();
+                if (confidence < FORGET) {
+                    explicitForget = true;
+                    continue;
+                }
+                if (text.length() < MIN_ENTRY_LENGTH || !allowed()) return new StoreResult(0, false);
+                requests++;
+                double[] vector = llm.embedding(text);
+                if (vector == null || vector.length == 0) return new StoreResult(0, false);
+                for (double value : vector) if (!Double.isFinite(value)) return new StoreResult(0, false);
+                replacements.add(new Replacement(text, Math.clamp(confidence, -0.99, 0.99), vector));
             }
-            if (confidence < FORGET) {
-                continue;   // отмечено к забвению
-            }
-            if (text.length() < MIN_ENTRY_LENGTH) {
-                continue;
-            }
+            if (replacements.isEmpty() && !explicitForget) return new StoreResult(0, false);
+            if (!Instant.now().isBefore(deadline) || interrupted.getAsBoolean()
+                    || Thread.currentThread().isInterrupted()) return new StoreResult(0, false);
+            List<DiaryEntry> created = new ArrayList<>();
             try {
-                // уверенность, пересчитанная моделью, — это и есть смысл пересмотра:
-                // подтверждённое крепнет, сомнительное слабеет. Единицу не ставим
-                // никогда: установленным фактом запись делает только человек
-                diary.save(text, llm.embedding(text), Math.clamp(confidence, -0.99, 0.99));
-                saved++;
-            } catch (RuntimeException e) {
-                log.debug("Обновлённая запись не сохранилась: {}", e.getMessage());
+                for (Replacement replacement : replacements) {
+                    created.add(diary.save(replacement.text(), replacement.embedding(), replacement.confidence()));
+                }
+            } catch (RuntimeException failure) {
+                for (DiaryEntry entry : created) Files.deleteIfExists(diary.directory().resolve(entry.id() + ".md"));
+                diary.reload();
+                throw failure;
             }
+            return new StoreResult(created.size(), true);
+        } catch (IOException | RuntimeException failure) {
+            log.warn("Замена памяти не сохранена: {}", failure.getMessage());
+            return new StoreResult(0, false);
         }
-        return saved;
     }
 
     /**

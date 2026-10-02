@@ -25,6 +25,15 @@ public final class Toolbox {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
+    public static final class PartialFailure extends LowQualityException {
+        private final List<ru.rainedev.raine.llm.Message> results;
+        public PartialFailure(String reason, List<ru.rainedev.raine.llm.Message> results) {
+            super(reason);
+            this.results = List.copyOf(results);
+        }
+        public List<ru.rainedev.raine.llm.Message> results() { return results; }
+    }
+
     private final Map<String, Tool> tools = new LinkedHashMap<>();
 
     public Toolbox(Tool... initial) {
@@ -79,8 +88,19 @@ public final class Toolbox {
         CurrentStep.set(calls);
         try {
             List<ru.rainedev.raine.llm.Message> results = new ArrayList<>();
-            for (ToolCall call : calls) {
-                results.add(ru.rainedev.raine.llm.Message.toolResult(call.id(), clean(invokeOne(call, appeared))));
+            for (int index = 0; index < calls.size(); index++) {
+                ToolCall call = calls.get(index);
+                try {
+                    results.add(ru.rainedev.raine.llm.Message.toolResult(call.id(), clean(invokeOne(call, appeared))));
+                } catch (LowQualityException failure) {
+                    if (results.isEmpty()) throw failure;
+                    results.add(ru.rainedev.raine.llm.Message.toolResult(call.id(), "Rejected: " + failure.getMessage()));
+                    for (int skipped = index + 1; skipped < calls.size(); skipped++) {
+                        results.add(ru.rainedev.raine.llm.Message.toolResult(calls.get(skipped).id(),
+                                "Not executed: previous action was rejected. Decide again."));
+                    }
+                    throw new PartialFailure(failure.getMessage(), results);
+                }
             }
             return results;
         } finally {

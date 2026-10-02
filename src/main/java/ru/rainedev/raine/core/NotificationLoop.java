@@ -61,6 +61,25 @@ public final class NotificationLoop {
 
     /** Сколько раз подряд текущее уведомление уже спотыкалось о пропавшую сеть. */
     private int retries;
+    private Turn active;
+    private Notification retrying;
+    private boolean suspended;
+    private java.util.function.BiConsumer<Notification, RuntimeException> onFailure = (n, e) -> {};
+
+    private static final class Turn {
+        final Notification notification;
+        final long startedAt = System.currentTimeMillis();
+        long tokens;
+        int step;
+        boolean recall = true;
+        boolean asked;
+        boolean prepared;
+        Turn(Notification notification) { this.notification = notification; }
+    }
+
+    public void onNotificationFailed(java.util.function.BiConsumer<Notification, RuntimeException> action) {
+        onFailure = action;
+    }
 
     private final LlmClient llm;
     private final SystemPrompt systemPrompt;
@@ -176,7 +195,6 @@ public final class NotificationLoop {
     public void run() {
         while (!Thread.currentThread().isInterrupted()) {
             Notification taken = null;
-            int contextBefore = context.size();
             try {
                 if (rest != null) {
                     // отходит перед тем, как взяться за уведомление: накопившееся
@@ -186,8 +204,13 @@ public final class NotificationLoop {
                 // ждём не бесконечно: разговор затих — значит через минуту снова
                 // проверим, не пора ли спать. Иначе разбуженная среди ночи она
                 // так и осталась бы на ногах до утра, пока ей не напишут ещё раз
-                Notification notification =
-                        queue.poll(idleCheck.toMillis(), java.util.concurrent.TimeUnit.MILLISECONDS);
+                Notification notification;
+                if (retrying != null) {
+                    notification = retrying;
+                    retrying = null;
+                } else {
+                    notification = queue.poll(idleCheck.toMillis(), java.util.concurrent.TimeUnit.MILLISECONDS);
+                }
                 if (stopping) {
                     log.info("Заканчиваю: новых уведомлений больше не беру");
                     stopped.countDown();
@@ -197,7 +220,11 @@ public final class NotificationLoop {
                     continue;
                 }
                 taken = notification;
-                contextBefore = context.size();
+                if (suspended) {
+                    onFailure.accept(notification, new IllegalStateException("Запросы приостановлены до перезапуска после ошибки оплаты/доступа"));
+                    notifyDone(notification);
+                    continue;
+                }
                 process(notification);
                 retries = 0;
                 notifyDone(notification);
@@ -210,10 +237,21 @@ public final class NotificationLoop {
                 if (Fatal.check(e)) {
                     return;
                 }
-                if (retryLater(taken, e, contextBefore)) {
+                if (retryLater(taken, e)) {
                     continue;
                 }
                 log.error("Не удалось обработать уведомление", e);
+                if (taken != null) {
+                    try { onFailure.accept(taken, e); }
+                    catch (RuntimeException saveFailure) { log.error("Не удалось сохранить необработанное уведомление", saveFailure); }
+                    notifyDone(taken);
+                }
+                active = null;
+                retries = 0;
+                if (e instanceof ru.rainedev.raine.llm.LlmFailure failure && failure.requiresOperator()) {
+                    suspended = true;
+                    log.error("Запросы приостановлены: проверьте баланс/доступ и перезапустите бота");
+                }
                 recoverFrom(e);
             }
         }
@@ -221,37 +259,47 @@ public final class NotificationLoop {
 
     /** Обработка одного уведомления целиком — до wait/pause. */
     public void process(Notification notification) {
-        long startedAt = System.currentTimeMillis();
-        long spentTokens = 0;
-        // «тебе написали» открытый чат заменяет собой: в нём и так всё видно.
-        // А вот «снимок готов, вот имя файла» в переписке не написано нигде —
-        // выбросив этот текст, мы оставили бы её ждать того, что уже случилось
-        String opened = openImmediately(notification).orElse("");
-        String text;
-        if (opened.isEmpty()) {
-            text = notification.text();
-        } else if (notification.ownText()) {
-            text = notification.text() + "\n\n" + opened;
-        } else {
-            text = opened;
-        }
-        context.add(Message.user(text + "\nCurrent time: " + Instant.now() + " UTC"));
+        boolean resuming = active != null && active.notification == notification;
+        if (!resuming) active = new Turn(notification);
+        Turn turn = active;
+        long startedAt = turn.startedAt;
+        long spentTokens = turn.tokens;
+        if (!resuming) {
+            // «тебе написали» открытый чат заменяет собой: в нём и так всё видно.
+            // А вот «снимок готов, вот имя файла» в переписке не написано нигде —
+            // выбросив этот текст, мы оставили бы её ждать того, что уже случилось
+            String opened = openImmediately(notification).orElse("");
+            String text;
+            if (opened.isEmpty()) {
+                text = notification.text();
+            } else if (notification.ownText()) {
+                text = notification.text() + "\n\n" + opened;
+            } else {
+                text = opened;
+            }
+            context.add(Message.user(text + "\nCurrent time: " + Instant.now() + " UTC"));
 
-        boolean recallMemories = true;
-        boolean askedThisTurn = false;
-        for (int step = 0; step < MAX_STEPS_PER_NOTIFICATION; step++) {
-            if (recallMemories) {
+        }
+        boolean recallMemories = turn.recall;
+        boolean askedThisTurn = turn.asked;
+        for (int step = turn.step; step < MAX_STEPS_PER_NOTIFICATION; step++) {
+            turn.step = step;
+            if (!turn.prepared && recallMemories) {
                 recallIntoContext();
             }
             // набор пересобирается каждый шаг: инструменты появляются по ходу дела.
             // открытие чата добавляет отправку — со снимком, снятым заранее, её бы не было
             Toolbox tools = withFinishingTools(notification.tools());
-            if (!askedThisTurn && tools.names().contains("ask")) {
+            if (!turn.prepared && !askedThisTurn && tools.names().contains("ask")) {
                 // напоминание встаёт прямо перед выбором действия, чтобы модель его заметила
                 appendToLast(ASK_REMINDER);
             }
+            turn.prepared = true;
             ChatResponse response = llm.chat(systemPrompt.text(), context, tools.asJson());
-            spentTokens = Math.max(spentTokens, response.totalTokens());
+            turn.prepared = false;
+            turn.step = step + 1;
+            spentTokens += response.totalTokens();
+            turn.tokens = spentTokens;
             List<ToolCall> calls = response.toolCalls();
 
             // мысли и намерения — то, ради чего вообще стоит смотреть в лог
@@ -278,6 +326,19 @@ public final class NotificationLoop {
                     tools.add(appeared);
                     notification.tools().add(appeared);
                 });
+            } catch (Toolbox.PartialFailure e) {
+                // Earlier actions are real: retain the complete tool protocol and do not replay them.
+                context.add(response.firstMessage().orElseThrow());
+                context.addAll(e.results());
+                appendToLast("Earlier successful actions have already happened. Do not repeat them. " + e.getMessage());
+                turn.recall = false;
+                recallMemories = false;
+                if (response.totalTokens() >= contextTokenLimit) {
+                    onContextOverflow.run();
+                    active = null;
+                    return;
+                }
+                continue;
             } catch (LowQualityException e) {
                 // откат: сообщение модели в контекст не попадает, вместо него — подсказка
                 log.info("Ответ низкого качества, пробуем иначе: {}", e.getMessage());
@@ -285,6 +346,7 @@ public final class NotificationLoop {
                 if (response.totalTokens() > contextTokenLimit) {
                     log.warn("Контекст переполнен, а подходящий ответ не найден — сбрасываем");
                     onContextOverflow.run();
+                    active = null;
                     return;
                 }
                 continue;
@@ -298,6 +360,8 @@ public final class NotificationLoop {
             // случайных фактов
             recallMemories = calls.stream().noneMatch(call -> "send_telegram_message".equals(call.name()));
             askedThisTurn |= calls.stream().anyMatch(call -> "ask".equals(call.name()));
+            turn.asked = askedThisTurn;
+            turn.recall = recallMemories;
             if (!askedThisTurn && !recallMemories) {
                 appendToLast(ASK_MISSED);
             }
@@ -307,6 +371,7 @@ public final class NotificationLoop {
                 if (response.totalTokens() >= contextTokenLimit) {
                     onContextOverflow.run();
                 }
+                active = null;
                 return;
             }
 
@@ -318,6 +383,7 @@ public final class NotificationLoop {
 
         reportCost(startedAt, spentTokens, MAX_STEPS_PER_NOTIFICATION);
         log.warn("Достигнут предел шагов — прекращаем ход принудительно");
+        active = null;
     }
 
     /**
@@ -325,7 +391,7 @@ public final class NotificationLoop {
      * ответить человеку, можно только по счёту у поставщика в конце месяца.
      */
     private static void reportCost(long startedAt, long tokens, int steps) {
-        log.info("Ход закончен: {} c, шагов {}, контекст вырос до {} токенов",
+        log.info("Ход закончен: {} c, шагов {}, израсходовано {} токенов",
                 (System.currentTimeMillis() - startedAt) / 1000, steps, tokens);
     }
 
@@ -397,13 +463,15 @@ public final class NotificationLoop {
      * <p>
      * Клиент уже пробовал трижды подряд; если сеть так и не вернулась, дальше
      * долбиться незачем — уведомление кладётся обратно в начало очереди и ждёт.
-     * Написанное в этот заход из контекста убирается: иначе при следующей
-     * попытке то же самое сообщение легло бы в разговор дважды.
+     * Контекст и шаг сохраняются: повтор продолжает тот же ход, не открывает
+     * уведомление заново и не забывает уже выполненные действия.
      *
      * @return взяли ли уведомление на новую попытку
      */
-    private boolean retryLater(Notification notification, RuntimeException failure, int contextBefore) {
-        if (notification == null || !(failure instanceof UncheckedIOException)) {
+    private boolean retryLater(Notification notification, RuntimeException failure) {
+        boolean transientFailure = failure instanceof UncheckedIOException
+                || failure instanceof ru.rainedev.raine.llm.LlmFailure endpoint && endpoint.retryable();
+        if (notification == null || !transientFailure || stopping) {
             return false;
         }
         if (++retries > MAX_RETRIES) {
@@ -411,10 +479,8 @@ public final class NotificationLoop {
             retries = 0;
             return false;
         }
-        while (context.size() > contextBefore) {
-            context.removeLast();
-        }
-        queue.addFirst(notification);
+        // Resume the existing turn and context: previous tool actions cannot be rolled back.
+        retrying = notification;
         log.warn("Сеть недоступна, вернусь к уведомлению через {} с (попытка {} из {})",
                 retryPause.toSeconds(), retries, MAX_RETRIES);
         sleep(retryPause);

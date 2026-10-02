@@ -131,7 +131,7 @@ public final class WorkingMemory {
             if (file.getParent() != null) {
                 Files.createDirectories(file.getParent());
             }
-            Files.writeString(file, content + "\n");
+            ru.rainedev.raine.storage.AtomicFiles.writeString(file, content + "\n");
             log.info("Рабочая память обновлена, {} символов", content.length());
         } catch (IOException e) {
             throw new UncheckedIOException("Не удалось сохранить рабочую память", e);

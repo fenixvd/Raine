@@ -30,7 +30,7 @@ public class Rest {
     private NightSleep night;
 
     /** Дневные отлучки можно выключить: остаётся только ночной сон. */
-    private boolean dayNaps = true;
+    private volatile boolean dayNaps = true;
 
     /**
      * Чем заняться ночью. Получает отведённое время и признак пробуждения.
@@ -40,7 +40,7 @@ public class Rest {
      * передышке среди дня — значит перекраивать дневник по нескольку раз
      * в сутки.
      */
-    private java.util.function.BiConsumer<Duration, java.util.function.BooleanSupplier> duringNight = (d, w) -> { };
+    private volatile java.util.function.BiConsumer<Duration, java.util.function.BooleanSupplier> duringNight = (d, w) -> { };
 
     /** Уснула или проснулась — по этому меняется статус «в сети». */
     private java.util.function.Consumer<Boolean> onStateChange = resting -> { };
@@ -49,6 +49,7 @@ public class Rest {
 
     /** Пора закрываться: спать больше незачем, и досыпать тем более. */
     private volatile boolean stopping;
+    private java.time.LocalDateTime consolidatedNight;
 
     public Rest(RandomGenerator random) {
         this.random = random;
@@ -118,15 +119,17 @@ public class Rest {
         }
         log.info("Ухожу {} — на {} мин", reason, duration.toMinutes());
 
+        long deadline = System.nanoTime() + duration.toNanos();
         resting = true;
         onStateChange.accept(true);
         try {
             // ночной сон — не простой: память в это время пересматривается.
             // Дневная передышка на это не годится, она слишком коротка и часта
-            if (night) {
-                duringNight.accept(duration, awoken::get);
+            if (night && !java.util.Objects.equals(consolidatedNight, this.night.bedtime())) {
+                consolidatedNight = this.night.bedtime();
+                duringNight.accept(duration, () -> awoken.get() || stopping);
             }
-            for (long waited = 0; waited < duration.toSeconds(); waited++) {
+            while (System.nanoTime() < deadline) {
                 if (awoken.get()) {
                     log.info("Вернулась раньше — меня позвали");
                     return;
@@ -135,7 +138,8 @@ public class Rest {
                     log.info("Просыпаюсь: пора закрываться");
                     return;
                 }
-                Thread.sleep(TICK);
+                long remaining = deadline - System.nanoTime();
+                if (remaining > 0) Thread.sleep(Duration.ofNanos(Math.min(TICK.toNanos(), remaining)));
             }
             log.info("Вернулась");
         } catch (InterruptedException e) {
